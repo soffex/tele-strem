@@ -2,7 +2,6 @@ const { addonBuilder } = require('stremio-addon-sdk');
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
-const crypto = require('crypto');
 
 // Addon manifest with catalogs
 const manifest = {
@@ -20,7 +19,7 @@ const manifest = {
             name: 'My Movies',
             extra: [
                 { name: 'search', isRequired: false },
-                { name: 'genre', isRequired: false, options: ['Action', 'Comedy', 'Drama', 'Horror', 'Sci-Fi', 'Thriller', 'Adventure', 'Crime'] }
+                { name: 'genre', isRequired: false, options: ['Action', 'Comedy', 'Drama', 'Horror', 'Sci-Fi', 'Thriller'] }
             ]
         },
         {
@@ -29,7 +28,7 @@ const manifest = {
             name: 'My Series',
             extra: [
                 { name: 'search', isRequired: false },
-                { name: 'genre', isRequired: false, options: ['Action', 'Comedy', 'Drama', 'Crime', 'Sci-Fi', 'Thriller'] }
+                { name: 'genre', isRequired: false, options: ['Action', 'Comedy', 'Drama', 'Crime', 'Sci-Fi'] }
             ]
         }
     ]
@@ -41,15 +40,13 @@ const CONFIG = {
     TELEGRAM_CHANNELS: (process.env.TELEGRAM_CHANNELS || '').split(',').filter(Boolean),
     PORT: process.env.PORT || 3000,
     CACHE_TTL: 3600000, // 1 hour
-    STREAM_BUFFER_SIZE: 1024 * 1024, // 1MB chunks
-    MAX_FILE_SIZE: 2000 * 1024 * 1024, // 2GB (Telegram limit)
 };
 
 // Content database
 let contentDatabase = {
     movies: new Map(),
     series: new Map(),
-    fileCache: new Map() // Cache for Telegram file info
+    fileCache: new Map()
 };
 
 // Cache for responses
@@ -107,7 +104,7 @@ class TelegramStreamServer {
         const limit = 100;
         let messageCount = 0;
 
-        while (messageCount < 500) { // Limit to prevent infinite loops
+        while (messageCount < 500) {
             try {
                 const messages = await this.getChannelMessages(channelId, offset, limit);
                 
@@ -120,7 +117,6 @@ class TelegramStreamServer {
                 offset += limit;
                 messageCount += messages.length;
                 
-                // Rate limiting
                 await this.sleep(1000);
                 
             } catch (error) {
@@ -132,7 +128,6 @@ class TelegramStreamServer {
 
     async getChannelMessages(channelId, offset = 0, limit = 100) {
         try {
-            // Try to get chat history (may not work for all channels)
             const response = await axios.get(
                 `https://api.telegram.org/bot${CONFIG.TELEGRAM_BOT_TOKEN}/getUpdates`,
                 {
@@ -157,24 +152,20 @@ class TelegramStreamServer {
 
     async processMessage(message, channelId) {
         try {
-            // Look for video files
             const video = message.video || message.document;
             if (!video) return;
 
-            // Only process video files
             const fileName = video.file_name || '';
             const isVideo = video.mime_type?.startsWith('video/') || 
                            fileName.match(/\.(mp4|mkv|avi|mov|wmv|flv|webm)$/i);
             
             if (!isVideo) return;
 
-            // Extract metadata from message text
             const text = message.text || message.caption || '';
             const metadata = this.extractMetadata(text, fileName);
             
-            if (!metadata.title) return; // Skip if no title found
+            if (!metadata.title) return;
 
-            // Create content entry
             const content = {
                 id: `tg:${metadata.type}:${message.message_id}`,
                 type: metadata.type,
@@ -198,7 +189,6 @@ class TelegramStreamServer {
                 }
             };
 
-            // Add to appropriate database
             if (metadata.type === 'movie') {
                 contentDatabase.movies.set(content.id, content);
             } else {
@@ -232,7 +222,6 @@ class TelegramStreamServer {
         for (const line of lines) {
             const trimmed = line.trim();
             if (trimmed.length > 3 && trimmed.length < 100 && !trimmed.startsWith('http')) {
-                // Remove common prefixes and clean up
                 const cleaned = trimmed
                     .replace(/^[🎬📺🎭🎪🎨🎯🔥⭐🌟✨💫🎊🎉📀💿📱📺🎥🎦📹🎬]+\s*/, '')
                     .replace(/\[.*?\]/g, '')
@@ -247,11 +236,10 @@ class TelegramStreamServer {
             }
         }
 
-        // Fallback to filename if no title found
         if (!metadata.title) {
             metadata.title = fileName
-                .replace(/\.[^.]+$/, '') // Remove extension
-                .replace(/[._-]/g, ' ')   // Replace separators
+                .replace(/\.[^.]+$/, '')
+                .replace(/[._-]/g, ' ')
                 .replace(/\b(bluray|webrip|hdtv|bdrip|dvdrip|cam|ts|tc|1080p|720p|480p)\b/gi, '')
                 .trim();
         }
@@ -274,43 +262,21 @@ class TelegramStreamServer {
             metadata.type = 'series';
         }
 
-        // Extract quality and add to description
+        // Extract quality
         const qualityMatch = (text + ' ' + fileName).match(/\b(\d{3,4}p|4K|UHD|HD|SD)\b/i);
         if (qualityMatch) {
             metadata.description = `Quality: ${qualityMatch[1]}`;
         }
 
-        // Extract genre from text
-        const genreKeywords = {
-            'action': 'Action',
-            'comedy': 'Comedy', 
-            'drama': 'Drama',
-            'horror': 'Horror',
-            'thriller': 'Thriller',
-            'sci-fi': 'Sci-Fi',
-            'romance': 'Romance',
-            'adventure': 'Adventure',
-            'crime': 'Crime'
-        };
-
-        const lowerText = text.toLowerCase();
-        Object.entries(genreKeywords).forEach(([keyword, genre]) => {
-            if (lowerText.includes(keyword)) {
-                metadata.genre.push(genre);
-            }
-        });
-
-        // Default poster (you can enhance this with TMDB API later)
+        // Default poster
         metadata.poster = `https://via.placeholder.com/300x450/1a1a2e/fff?text=${encodeURIComponent(metadata.title)}`;
         metadata.background = metadata.poster;
 
         return metadata;
     }
 
-    // Telegram file streaming proxy
     async streamTelegramFile(fileId, range, res) {
         try {
-            // Get file info from Telegram
             const fileInfo = await this.getTelegramFileInfo(fileId);
             if (!fileInfo) {
                 return res.status(404).send('File not found');
@@ -318,7 +284,6 @@ class TelegramStreamServer {
 
             const fileUrl = `https://api.telegram.org/file/bot${CONFIG.TELEGRAM_BOT_TOKEN}/${fileInfo.file_path}`;
             
-            // Handle range requests for video streaming
             const headers = {
                 'Content-Type': 'video/mp4',
                 'Accept-Ranges': 'bytes',
@@ -336,7 +301,6 @@ class TelegramStreamServer {
                 
                 res.writeHead(206, headers);
 
-                // Stream the file chunk
                 const response = await axios.get(fileUrl, {
                     headers: { Range: `bytes=${start}-${end}` },
                     responseType: 'stream'
@@ -347,7 +311,6 @@ class TelegramStreamServer {
                 headers['Content-Length'] = fileInfo.file_size;
                 res.writeHead(200, headers);
 
-                // Stream the entire file
                 const response = await axios.get(fileUrl, {
                     responseType: 'stream'
                 });
@@ -363,7 +326,6 @@ class TelegramStreamServer {
 
     async getTelegramFileInfo(fileId) {
         try {
-            // Check cache first
             if (contentDatabase.fileCache.has(fileId)) {
                 const cached = contentDatabase.fileCache.get(fileId);
                 if (Date.now() - cached.timestamp < CONFIG.CACHE_TTL) {
@@ -378,7 +340,6 @@ class TelegramStreamServer {
 
             const fileInfo = response.data.result;
             
-            // Cache the result
             contentDatabase.fileCache.set(fileId, {
                 data: fileInfo,
                 timestamp: Date.now()
@@ -396,7 +357,6 @@ class TelegramStreamServer {
         try {
             const cacheKey = `catalog:${type}:${id}:${JSON.stringify(extra)}`;
             
-            // Check cache
             if (cache.has(cacheKey)) {
                 const cached = cache.get(cacheKey);
                 if (Date.now() - cached.timestamp < CONFIG.CACHE_TTL) {
@@ -408,7 +368,6 @@ class TelegramStreamServer {
             const database = type === 'movie' ? contentDatabase.movies : contentDatabase.series;
             const allItems = Array.from(database.values());
 
-            // Apply search filter
             if (extra.search) {
                 const searchTerm = extra.search.toLowerCase();
                 items = allItems.filter(item => 
@@ -419,17 +378,14 @@ class TelegramStreamServer {
                 items = allItems;
             }
 
-            // Apply genre filter
             if (extra.genre) {
                 items = items.filter(item => 
                     item.genre && item.genre.includes(extra.genre)
                 );
             }
 
-            // Sort by name
             items.sort((a, b) => a.name.localeCompare(b.name));
 
-            // Format for Stremio
             const metas = items.map(item => ({
                 id: item.id,
                 type: item.type,
@@ -447,7 +403,6 @@ class TelegramStreamServer {
 
             const result = { metas };
 
-            // Cache result
             cache.set(cacheKey, {
                 data: result,
                 timestamp: Date.now()
@@ -562,17 +517,16 @@ class TelegramStreamServer {
     }
 
     loadSampleContent() {
-        // Sample content for demonstration
         const sampleMovies = [
             {
                 id: 'tg:movie:sample1',
                 type: 'movie',
-                name: 'Sample Movie 1',
+                name: 'Sample Movie - Add Bot Token',
                 year: '2023',
-                poster: 'https://via.placeholder.com/300x450/1a1a2e/fff?text=Sample+Movie+1',
-                description: 'Add your Telegram bot token and channels to load real content!',
+                poster: 'https://via.placeholder.com/300x450/1a1a2e/fff?text=Add+Bot+Token',
+                description: 'Configure TELEGRAM_BOT_TOKEN and TELEGRAM_CHANNELS to load your real content!',
                 genre: ['Action'],
-                telegramFile: null // No real file for sample
+                telegramFile: null
             }
         ];
 
@@ -580,7 +534,7 @@ class TelegramStreamServer {
             contentDatabase.movies.set(movie.id, movie);
         });
 
-        console.log('📚 Loaded sample content - Add bot token and channels for real content');
+        console.log('📚 Sample content loaded - Add bot token for real content');
     }
 
     sleep(ms) {
@@ -653,16 +607,14 @@ class TelegramStreamServer {
         // Configuration interface
         app.get('/configure', (req, res) => {
             const moviesList = Array.from(contentDatabase.movies.values())
-                .slice(0, 10) // Show first 10
+                .slice(0, 10)
                 .map(movie => `<li><strong>${movie.name}</strong> (${movie.year}) ${movie.telegramFile ? '✅' : '❌'}</li>`)
                 .join('');
             
             const seriesList = Array.from(contentDatabase.series.values())
-                .slice(0, 10) // Show first 10
+                .slice(0, 10)
                 .map(series => `<li><strong>${series.name}</strong> (${series.year}) ${series.telegramFile ? '✅' : '❌'}</li>`)
                 .join('');
-
-            const hasMore = contentDatabase.movies.size > 10 || contentDatabase.series.size > 10;
 
             res.send(`
                 <!DOCTYPE html>
@@ -672,108 +624,23 @@ class TelegramStreamServer {
                     <meta name="viewport" content="width=device-width, initial-scale=1">
                     <style>
                         body { 
-                            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
-                            max-width: 1200px; 
+                            font-family: Arial, sans-serif;
+                            max-width: 1000px; 
                             margin: 0 auto; 
                             padding: 20px;
-                            background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 100%);
+                            background: #0f0f23;
                             color: #fff;
-                            line-height: 1.6;
-                            min-height: 100vh;
                         }
-                        .container {
-                            background: rgba(26, 26, 46, 0.8);
-                            padding: 40px;
-                            border-radius: 20px;
-                            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-                            backdrop-filter: blur(10px);
-                        }
-                        h1 { 
-                            color: #ff6b35; 
-                            border-bottom: 3px solid #ff6b35; 
-                            padding-bottom: 15px;
-                            margin-bottom: 30px;
-                            font-size: 2.5em;
-                        }
-                        h2, h3 { color: #ffa500; margin-top: 30px; }
-                        .status { 
-                            padding: 25px; 
-                            border-radius: 15px; 
-                            margin: 25px 0;
-                            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                            border: none;
-                        }
-                        .manifest-url {
-                            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-                            padding: 25px;
-                            border-radius: 15px;
-                            margin: 25px 0;
-                            font-family: 'Monaco', 'Menlo', monospace;
-                            word-break: break-all;
-                        }
-                        .stats {
-                            display: grid;
-                            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-                            gap: 20px;
-                            margin: 30px 0;
-                        }
-                        .stat-card {
-                            background: linear-gradient(135deg, #43cea2 0%, #185a9d 100%);
-                            padding: 25px;
-                            border-radius: 15px;
-                            text-align: center;
-                        }
-                        .stat-number {
-                            font-size: 2.5em;
-                            font-weight: bold;
-                            margin-bottom: 10px;
-                        }
-                        .btn {
-                            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                            color: white;
-                            padding: 15px 30px;
-                            border: none;
-                            border-radius: 10px;
-                            text-decoration: none;
-                            display: inline-block;
-                            margin: 10px 10px;
-                            cursor: pointer;
-                            transition: all 0.3s;
-                            font-weight: bold;
-                        }
-                        .btn:hover {
-                            transform: translateY(-3px);
-                            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
-                        }
-                        .btn-refresh {
-                            background: linear-gradient(135deg, #ff6b35 0%, #f7931e 100%);
-                        }
-                        ul { 
-                            background: rgba(22, 33, 62, 0.5);
-                            padding: 25px;
-                            border-radius: 15px;
-                            margin: 20px 0;
-                        }
-                        li { 
-                            margin: 15px 0; 
-                            padding: 12px;
-                            background: rgba(255, 255, 255, 0.05);
-                            border-radius: 8px;
-                            border-left: 4px solid #ff6b35;
-                        }
-                        code { 
-                            background: rgba(255, 255, 255, 0.1); 
-                            padding: 6px 12px; 
-                            border-radius: 6px;
-                            font-family: 'Monaco', 'Menlo', monospace;
-                        }
-                        .config-status {
-                            padding: 20px;
-                            border-radius: 10px;
-                            margin: 20px 0;
-                        }
-                        .config-ok { background: linear-gradient(135deg, #56ab2f 0%, #a8e6cf 100%); }
-                        .config-error { background: linear-gradient(135deg, #ff416c 0%, #ff4b2b 100%); }
+                        .container { background: #1a1a2e; padding: 30px; border-radius: 15px; }
+                        h1 { color: #ff6b35; border-bottom: 3px solid #ff6b35; padding-bottom: 15px; }
+                        .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin: 20px 0; }
+                        .stat-card { background: linear-gradient(135deg, #43cea2 0%, #185a9d 100%); padding: 20px; border-radius: 10px; text-align: center; }
+                        .stat-number { font-size: 2em; font-weight: bold; margin-bottom: 5px; }
+                        .manifest-url { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); padding: 20px; border-radius: 10px; margin: 20px 0; }
+                        .btn { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 25px; border: none; border-radius: 8px; text-decoration: none; display: inline-block; margin: 10px 5px; }
+                        ul { background: #16213e; padding: 20px; border-radius: 10px; margin: 15px 0; }
+                        li { margin: 10px 0; padding: 8px; background: rgba(255, 255, 255, 0.05); border-radius: 5px; }
+                        code { background: rgba(255, 255, 255, 0.1); padding: 4px 8px; border-radius: 4px; }
                     </style>
                 </head>
                 <body>
@@ -790,31 +657,106 @@ class TelegramStreamServer {
                                 <div>Series</div>
                             </div>
                             <div class="stat-card">
-                                <div class="stat-number">${cache.size}</div>
-                                <div>Cached Items</div>
-                            </div>
-                            <div class="stat-card">
                                 <div class="stat-number">${CONFIG.TELEGRAM_CHANNELS.length}</div>
                                 <div>Channels</div>
                             </div>
-                        </div>
-
-                        <div class="config-status ${CONFIG.TELEGRAM_BOT_TOKEN ? 'config-ok' : 'config-error'}">
-                            <h3>🤖 Bot Configuration:</h3>
-                            <p><strong>Status:</strong> ${CONFIG.TELEGRAM_BOT_TOKEN ? '✅ Configured' : '❌ Not configured'}</p>
-                            <p><strong>Channels:</strong> ${CONFIG.TELEGRAM_CHANNELS.length ? CONFIG.TELEGRAM_CHANNELS.join(', ') : 'None configured'}</p>
-                            ${!CONFIG.TELEGRAM_BOT_TOKEN ? '<p><strong>⚠️ Add TELEGRAM_BOT_TOKEN and TELEGRAM_CHANNELS environment variables to load real content!</strong></p>' : ''}
+                            <div class="stat-card">
+                                <div class="stat-number">${CONFIG.TELEGRAM_BOT_TOKEN ? '✅' : '❌'}</div>
+                                <div>Bot Status</div>
+                            </div>
                         </div>
                         
                         <div class="manifest-url">
                             <h3>📱 Install in Stremio:</h3>
-                            <p><strong>Manifest URL:</strong></p>
                             <p><code>${req.protocol}://${req.get('host')}/manifest.json</code></p>
-                            <p><small>Copy this URL and paste it in Stremio → Addons → Install from URL</small></p>
                         </div>
 
-                        <div class="status">
-                            <h3>✨ New in v3.0 - Direct Telegram Streaming:</h3>
-                            <ul style="background: none; padding: 0;">
-                                <li>🎯 <strong>Auto-discovery</strong> - Scans your Telegram channels automatically</li>
-                                <li>🎥 <strong>Direct streaming</strong> - Streams Telegram files directly to
+                        <h3>🎬 Movies (${contentDatabase.movies.size}):</h3>
+                        <ul>${moviesList || '<li>No movies found. Add bot token and channels.</li>'}</ul>
+
+                        <h3>📺 Series (${contentDatabase.series.size}):</h3>
+                        <ul>${seriesList || '<li>No series found. Add bot token and channels.</li>'}</ul>
+
+                        <div style="text-align: center; margin-top: 40px;">
+                            <a href="/health" class="btn">Health Check</a>
+                            <button onclick="refresh()" class="btn">Refresh Content</button>
+                        </div>
+
+                        <script>
+                            async function refresh() {
+                                try {
+                                    const response = await fetch('/refresh', { method: 'POST' });
+                                    const data = await response.json();
+                                    alert('Refreshed! Movies: ' + data.movies + ', Series: ' + data.series);
+                                    location.reload();
+                                } catch (error) {
+                                    alert('Refresh failed: ' + error.message);
+                                }
+                            }
+                            setInterval(() => fetch('/ping').catch(() => {}), 600000);
+                        </script>
+                    </div>
+                </body>
+                </html>
+            `);
+        });
+
+        // Serve addon manifest
+        app.get('/manifest.json', (req, res) => {
+            res.json(manifest);
+        });
+
+        // Use the addon middleware
+        try {
+            const addonInterface = this.addon.getInterface();
+            if (addonInterface && typeof addonInterface === 'function') {
+                app.use(addonInterface);
+                console.log('✅ Stremio SDK interface loaded');
+            }
+        } catch (error) {
+            console.error('Error setting up addon interface:', error);
+        }
+
+        return app;
+    }
+
+    start() {
+        try {
+            const app = this.getExpressApp();
+            
+            app.listen(CONFIG.PORT, () => {
+                console.log(`🚀 Telegram Stream Server v3.0 running on port ${CONFIG.PORT}`);
+                console.log(`📚 Content: ${contentDatabase.movies.size} movies, ${contentDatabase.series.size} series`);
+                console.log(`🤖 Bot: ${CONFIG.TELEGRAM_BOT_TOKEN ? 'Configured' : 'Not configured'}`);
+                console.log(`📺 Channels: ${CONFIG.TELEGRAM_CHANNELS.length}`);
+                console.log(`🔗 Manifest: http://localhost:${CONFIG.PORT}/manifest.json`);
+            });
+        } catch (error) {
+            console.error('Error starting server:', error);
+            throw error;
+        }
+    }
+}
+
+// Initialize and start
+let addon;
+
+try {
+    addon = new TelegramStreamServer();
+} catch (error) {
+    console.error('Error initializing addon:', error);
+    process.exit(1);
+}
+
+// Export for testing
+module.exports = { TelegramStreamServer, CONFIG };
+
+// Start server
+if (require.main === module) {
+    try {
+        addon.start();
+    } catch (error) {
+        console.error('Error starting addon:', error);
+        process.exit(1);
+    }
+                                        }
