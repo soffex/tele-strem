@@ -128,24 +128,56 @@ class TelegramStreamServer {
 
     async getChannelMessages(channelId, offset = 0, limit = 100) {
         try {
-            const response = await axios.get(
+            // Method 1: Try to get chat administrators to verify access
+            const adminResponse = await axios.get(
+                `https://api.telegram.org/bot${CONFIG.TELEGRAM_BOT_TOKEN}/getChatAdministrators`,
+                { params: { chat_id: channelId }, timeout: 10000 }
+            );
+
+            if (!adminResponse.data.ok) {
+                throw new Error(`Cannot access channel ${channelId}: ${adminResponse.data.description}`);
+            }
+
+            console.log(`✅ Bot has access to channel ${channelId}`);
+
+            // Method 2: Get recent updates that include channel posts
+            const updatesResponse = await axios.get(
                 `https://api.telegram.org/bot${CONFIG.TELEGRAM_BOT_TOKEN}/getUpdates`,
                 {
-                    params: { offset, limit },
+                    params: {
+                        allowed_updates: JSON.stringify(['channel_post']),
+                        limit: 100,
+                        offset: -100 // Get recent messages
+                    },
                     timeout: 10000
                 }
             );
 
-            const updates = response.data?.result || [];
-            return updates
-                .filter(update => 
-                    update.channel_post && 
-                    update.channel_post.chat.id.toString() === channelId.toString()
-                )
+            if (!updatesResponse.data.ok) {
+                throw new Error(`Cannot get updates: ${updatesResponse.data.description}`);
+            }
+
+            // Filter for our specific channel
+            const updates = updatesResponse.data.result || [];
+            const channelMessages = updates
+                .filter(update => {
+                    if (!update.channel_post) return false;
+                    const postChannelId = update.channel_post.chat.id.toString();
+                    return postChannelId === channelId.toString();
+                })
                 .map(update => update.channel_post);
 
+            console.log(`📨 Found ${channelMessages.length} messages from channel ${channelId}`);
+            return channelMessages;
+
         } catch (error) {
-            console.error('Error getting channel messages:', error.message);
+            if (error.response?.status === 400) {
+                console.error(`❌ Bot not admin in channel ${channelId}:`, error.response.data.description);
+            } else if (error.response?.status === 403) {
+                console.error(`❌ Bot kicked/blocked from channel ${channelId}:`, error.response.data.description);
+            } else {
+                console.error(`❌ Error accessing channel ${channelId}:`, error.message);
+            }
             return [];
         }
     }
@@ -557,206 +589,4 @@ class TelegramStreamServer {
             const { fileId } = req.params;
             const range = req.headers.range;
             
-            console.log(`🎥 Streaming file: ${fileId}, Range: ${range || 'full'}`);
-            await this.streamTelegramFile(fileId, range, res);
-        });
-
-        // Keep-alive endpoint
-        app.get('/ping', (req, res) => {
-            res.json({ 
-                status: 'alive', 
-                timestamp: new Date().toISOString(),
-                movies: contentDatabase.movies.size,
-                series: contentDatabase.series.size
-            });
-        });
-
-        // Health check
-        app.get('/health', (req, res) => {
-            res.json({ 
-                status: 'ok',
-                version: '3.0.0',
-                movies: contentDatabase.movies.size,
-                series: contentDatabase.series.size,
-                cache_size: cache.size,
-                bot_configured: !!CONFIG.TELEGRAM_BOT_TOKEN,
-                channels_configured: CONFIG.TELEGRAM_CHANNELS.length
-            });
-        });
-
-        // Force refresh content from channels
-        app.post('/refresh', async (req, res) => {
-            try {
-                console.log('🔄 Manual refresh requested...');
-                contentDatabase.movies.clear();
-                contentDatabase.series.clear();
-                cache.clear();
-                
-                await this.loadContentFromChannels();
-                
-                res.json({ 
-                    success: true, 
-                    movies: contentDatabase.movies.size,
-                    series: contentDatabase.series.size
-                });
-            } catch (error) {
-                res.status(500).json({ success: false, error: error.message });
-            }
-        });
-
-        // Configuration interface
-        app.get('/configure', (req, res) => {
-            const moviesList = Array.from(contentDatabase.movies.values())
-                .slice(0, 10)
-                .map(movie => `<li><strong>${movie.name}</strong> (${movie.year}) ${movie.telegramFile ? '✅' : '❌'}</li>`)
-                .join('');
-            
-            const seriesList = Array.from(contentDatabase.series.values())
-                .slice(0, 10)
-                .map(series => `<li><strong>${series.name}</strong> (${series.year}) ${series.telegramFile ? '✅' : '❌'}</li>`)
-                .join('');
-
-            res.send(`
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>Telegram Stream Server v3.0</title>
-                    <meta name="viewport" content="width=device-width, initial-scale=1">
-                    <style>
-                        body { 
-                            font-family: Arial, sans-serif;
-                            max-width: 1000px; 
-                            margin: 0 auto; 
-                            padding: 20px;
-                            background: #0f0f23;
-                            color: #fff;
-                        }
-                        .container { background: #1a1a2e; padding: 30px; border-radius: 15px; }
-                        h1 { color: #ff6b35; border-bottom: 3px solid #ff6b35; padding-bottom: 15px; }
-                        .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin: 20px 0; }
-                        .stat-card { background: linear-gradient(135deg, #43cea2 0%, #185a9d 100%); padding: 20px; border-radius: 10px; text-align: center; }
-                        .stat-number { font-size: 2em; font-weight: bold; margin-bottom: 5px; }
-                        .manifest-url { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); padding: 20px; border-radius: 10px; margin: 20px 0; }
-                        .btn { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 25px; border: none; border-radius: 8px; text-decoration: none; display: inline-block; margin: 10px 5px; }
-                        ul { background: #16213e; padding: 20px; border-radius: 10px; margin: 15px 0; }
-                        li { margin: 10px 0; padding: 8px; background: rgba(255, 255, 255, 0.05); border-radius: 5px; }
-                        code { background: rgba(255, 255, 255, 0.1); padding: 4px 8px; border-radius: 4px; }
-                    </style>
-                </head>
-                <body>
-                    <div class="container">
-                        <h1>🎬 Telegram Stream Server v3.0</h1>
-                        
-                        <div class="stats">
-                            <div class="stat-card">
-                                <div class="stat-number">${contentDatabase.movies.size}</div>
-                                <div>Movies</div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-number">${contentDatabase.series.size}</div>
-                                <div>Series</div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-number">${CONFIG.TELEGRAM_CHANNELS.length}</div>
-                                <div>Channels</div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-number">${CONFIG.TELEGRAM_BOT_TOKEN ? '✅' : '❌'}</div>
-                                <div>Bot Status</div>
-                            </div>
-                        </div>
-                        
-                        <div class="manifest-url">
-                            <h3>📱 Install in Stremio:</h3>
-                            <p><code>${req.protocol}://${req.get('host')}/manifest.json</code></p>
-                        </div>
-
-                        <h3>🎬 Movies (${contentDatabase.movies.size}):</h3>
-                        <ul>${moviesList || '<li>No movies found. Add bot token and channels.</li>'}</ul>
-
-                        <h3>📺 Series (${contentDatabase.series.size}):</h3>
-                        <ul>${seriesList || '<li>No series found. Add bot token and channels.</li>'}</ul>
-
-                        <div style="text-align: center; margin-top: 40px;">
-                            <a href="/health" class="btn">Health Check</a>
-                            <button onclick="refresh()" class="btn">Refresh Content</button>
-                        </div>
-
-                        <script>
-                            async function refresh() {
-                                try {
-                                    const response = await fetch('/refresh', { method: 'POST' });
-                                    const data = await response.json();
-                                    alert('Refreshed! Movies: ' + data.movies + ', Series: ' + data.series);
-                                    location.reload();
-                                } catch (error) {
-                                    alert('Refresh failed: ' + error.message);
-                                }
-                            }
-                            setInterval(() => fetch('/ping').catch(() => {}), 600000);
-                        </script>
-                    </div>
-                </body>
-                </html>
-            `);
-        });
-
-        // Serve addon manifest
-        app.get('/manifest.json', (req, res) => {
-            res.json(manifest);
-        });
-
-        // Use the addon middleware
-        try {
-            const addonInterface = this.addon.getInterface();
-            if (addonInterface && typeof addonInterface === 'function') {
-                app.use(addonInterface);
-                console.log('✅ Stremio SDK interface loaded');
-            }
-        } catch (error) {
-            console.error('Error setting up addon interface:', error);
-        }
-
-        return app;
-    }
-
-    start() {
-        try {
-            const app = this.getExpressApp();
-            
-            app.listen(CONFIG.PORT, () => {
-                console.log(`🚀 Telegram Stream Server v3.0 running on port ${CONFIG.PORT}`);
-                console.log(`📚 Content: ${contentDatabase.movies.size} movies, ${contentDatabase.series.size} series`);
-                console.log(`🤖 Bot: ${CONFIG.TELEGRAM_BOT_TOKEN ? 'Configured' : 'Not configured'}`);
-                console.log(`📺 Channels: ${CONFIG.TELEGRAM_CHANNELS.length}`);
-                console.log(`🔗 Manifest: http://localhost:${CONFIG.PORT}/manifest.json`);
-            });
-        } catch (error) {
-            console.error('Error starting server:', error);
-            throw error;
-        }
-    }
-}
-
-// Initialize and start
-let addon;
-
-try {
-    addon = new TelegramStreamServer();
-} catch (error) {
-    console.error('Error initializing addon:', error);
-    process.exit(1);
-}
-
-// Export for testing
-module.exports = { TelegramStreamServer, CONFIG };
-
-// Start server
-if (require.main === module) {
-    try {
-        addon.start();
-    } catch (error) {
-        console.error('Error starting addon:', error);
-        process.exit(1);
-    }
-                                        }
+            console.log(`🎥 Streaming file: ${f
