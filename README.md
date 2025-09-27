@@ -168,8 +168,8 @@ open http://localhost:3000/configure
 ### Quick Start:
 ```bash
 # Clone repository
-git clone https://github.com/YOUR_USERNAME/telegram-stremio-addon.git
-cd telegram-stremio-addon
+git clone https://github.com/soffex/tele-strem.git
+cd tele-strem
 
 # Create .env file with your tokens
 cp .env.example .env
