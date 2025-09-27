@@ -478,34 +478,103 @@ class TelegramStreamsAddon {
             `);
         });
 
-        // Use the addon middleware
-        app.use(this.addon.getInterface());
+        // Use the addon middleware - handle potential undefined
+        try {
+            const addonInterface = this.addon.getInterface();
+            if (addonInterface && typeof addonInterface === 'function') {
+                app.use(addonInterface);
+            } else {
+                // Manual stream endpoint if getInterface() fails
+                app.get('/stream/:type/:id.json', async (req, res) => {
+                    try {
+                        const { type, id } = req.params;
+                        const streams = await this.searchStreams(id, type);
+                        res.json({ streams });
+                    } catch (error) {
+                        console.error('Stream endpoint error:', error);
+                        res.json({ streams: [] });
+                    }
+                });
+                
+                app.get('/stream/:type/:id', async (req, res) => {
+                    try {
+                        const { type, id } = req.params;
+                        const streams = await this.searchStreams(id, type);
+                        res.json({ streams });
+                    } catch (error) {
+                        console.error('Stream endpoint error:', error);
+                        res.json({ streams: [] });
+                    }
+                });
+            }
+        } catch (error) {
+            console.error('Error setting up addon interface:', error);
+            // Fallback manual endpoints
+            app.get('/stream/:type/:id.json', async (req, res) => {
+                try {
+                    const { type, id } = req.params;
+                    const streams = await this.searchStreams(id, type);
+                    res.json({ streams });
+                } catch (error) {
+                    console.error('Stream endpoint error:', error);
+                    res.json({ streams: [] });
+                }
+            });
+            
+            app.get('/stream/:type/:id', async (req, res) => {
+                try {
+                    const { type, id } = req.params;
+                    const streams = await this.searchStreams(id, type);
+                    res.json({ streams });
+                } catch (error) {
+                    console.error('Stream endpoint error:', error);
+                    res.json({ streams: [] });
+                }
+            });
+        }
 
         return app;
     }
 
     start() {
-        const app = this.getExpressApp();
-        
-        app.listen(CONFIG.PORT, () => {
-            console.log(`🚀 Telegram Streams Addon running on port ${CONFIG.PORT}`);
-            console.log(`📺 Configured channels: ${CONFIG.TELEGRAM_CHANNELS.length}`);
-            console.log(`🤖 Bot tokens: ${CONFIG.TELEGRAM_BOT_TOKENS.length}`);
-            console.log(`⚡ Rate limit: ${CONFIG.MAX_REQUESTS_PER_BOT_PER_MINUTE} req/min per bot`);
-            console.log(`⏱️  Delay between requests: ${CONFIG.RATE_LIMIT_DELAY}ms`);
-            console.log(`🔗 Manifest URL: http://localhost:${CONFIG.PORT}/manifest.json`);
-            console.log(`⚙️  Configuration: http://localhost:${CONFIG.PORT}/configure`);
-        });
+        try {
+            const app = this.getExpressApp();
+            
+            app.listen(CONFIG.PORT, () => {
+                console.log(`🚀 Telegram Streams Addon running on port ${CONFIG.PORT}`);
+                console.log(`📺 Configured channels: ${CONFIG.TELEGRAM_CHANNELS.length}`);
+                console.log(`🤖 Bot tokens: ${CONFIG.TELEGRAM_BOT_TOKENS.length}`);
+                console.log(`⚡ Rate limit: ${CONFIG.MAX_REQUESTS_PER_BOT_PER_MINUTE} req/min per bot`);
+                console.log(`⏱️  Delay between requests: ${CONFIG.RATE_LIMIT_DELAY}ms`);
+                console.log(`🔗 Manifest URL: http://localhost:${CONFIG.PORT}/manifest.json`);
+                console.log(`⚙️  Configuration: http://localhost:${CONFIG.PORT}/configure`);
+            });
+        } catch (error) {
+            console.error('Error starting server:', error);
+            throw error;
+        }
     }
 }
 
 // Initialize and start the addon
-const addon = new TelegramStreamsAddon();
+let addon;
+
+try {
+    addon = new TelegramStreamsAddon();
+} catch (error) {
+    console.error('Error initializing addon:', error);
+    process.exit(1);
+}
 
 // Export for testing or external usage
 module.exports = { TelegramStreamsAddon, CONFIG };
 
 // Start the server if this file is run directly
 if (require.main === module) {
-    addon.start();
-                                        }
+    try {
+        addon.start();
+    } catch (error) {
+        console.error('Error starting addon:', error);
+        process.exit(1);
+    }
+    }
