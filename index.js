@@ -589,4 +589,485 @@ class TelegramStreamServer {
             const { fileId } = req.params;
             const range = req.headers.range;
             
-            console.log(`🎥 Streaming file: ${f
+            console.log(`🎥 Streaming file: ${fileId}, Range: ${range || 'full'}`);
+            await this.streamTelegramFile(fileId, range, res);
+        });
+
+        // Keep-alive endpoint
+        app.get('/ping', (req, res) => {
+            res.json({ 
+                status: 'alive', 
+                timestamp: new Date().toISOString(),
+                movies: contentDatabase.movies.size,
+                series: contentDatabase.series.size
+            });
+        });
+
+        // Health check
+        app.get('/health', (req, res) => {
+            res.json({ 
+                status: 'ok',
+                version: '3.0.0',
+                movies: contentDatabase.movies.size,
+                series: contentDatabase.series.size,
+                cache_size: cache.size,
+                bot_configured: !!CONFIG.TELEGRAM_BOT_TOKEN,
+                channels_configured: CONFIG.TELEGRAM_CHANNELS.length
+            });
+        });
+
+        // Force refresh content from channels
+        app.post('/refresh', async (req, res) => {
+            try {
+                console.log('🔄 Manual refresh requested...');
+                contentDatabase.movies.clear();
+                contentDatabase.series.clear();
+                cache.clear();
+                
+                await this.loadContentFromChannels();
+                
+                res.json({ 
+                    success: true, 
+                    movies: contentDatabase.movies.size,
+                    series: contentDatabase.series.size
+                });
+            } catch (error) {
+                res.status(500).json({ success: false, error: error.message });
+            }
+        });
+
+        // Manual content addition endpoint
+        app.post('/add-content', async (req, res) => {
+            try {
+                const { name, year, type, fileId, fileName, channelId, messageId, description, genre } = req.body;
+                
+                if (!name || !fileId) {
+                    return res.status(400).json({ error: 'Name and fileId are required' });
+                }
+
+                const content = {
+                    id: `tg:${type || 'movie'}:${Date.now()}`,
+                    type: type || 'movie',
+                    name: name,
+                    year: year || '',
+                    poster: `https://via.placeholder.com/300x450/1a1a2e/fff?text=${encodeURIComponent(name)}`,
+                    background: `https://via.placeholder.com/300x450/1a1a2e/fff?text=${encodeURIComponent(name)}`,
+                    description: description || `Watch ${name}`,
+                    genre: genre || ['Action'],
+                    director: [],
+                    cast: [],
+                    runtime: '',
+                    imdb_id: '',
+                    telegramFile: {
+                        fileId: fileId,
+                        fileName: fileName || name,
+                        fileSize: 0,
+                        mimeType: 'video/mp4',
+                        channelId: channelId,
+                        messageId: messageId
+                    }
+                };
+
+                if (content.type === 'movie') {
+                    contentDatabase.movies.set(content.id, content);
+                } else {
+                    contentDatabase.series.set(content.id, content);
+                }
+
+                console.log(`➕ Manually added ${content.type}: ${content.name}`);
+                res.json({ success: true, id: content.id, message: `${content.type} added successfully` });
+
+            } catch (error) {
+                res.status(500).json({ error: error.message });
+            }
+        });
+
+        // Get file info from Telegram to extract fileId
+        app.post('/extract-file-info', async (req, res) => {
+            try {
+                const { channelId, messageId } = req.body;
+                
+                if (!channelId || !messageId) {
+                    return res.status(400).json({ error: 'channelId and messageId are required' });
+                }
+
+                // This won't work with old messages, but we can provide instructions
+                res.json({
+                    success: false,
+                    message: 'To get file info, you need to forward the message to a bot or use Telegram API manually',
+                    instructions: [
+                        '1. Forward your video message to @userinfobot',
+                        '2. It will show the file_id in the response',
+                        '3. Use that file_id in the /add-content endpoint'
+                    ]
+                });
+
+            } catch (error) {
+                res.status(500).json({ error: error.message });
+            }
+        });
+
+        // Configuration interface
+        app.get('/configure', (req, res) => {
+            const moviesList = Array.from(contentDatabase.movies.values())
+                .slice(0, 10)
+                .map(movie => `<li><strong>${movie.name}</strong> (${movie.year}) ${movie.telegramFile ? '✅' : '❌'}</li>`)
+                .join('');
+            
+            const seriesList = Array.from(contentDatabase.series.values())
+                .slice(0, 10)
+                .map(series => `<li><strong>${series.name}</strong> (${series.year}) ${series.telegramFile ? '✅' : '❌'}</li>`)
+                .join('');
+
+            res.send(`
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Telegram Stream Server v3.0</title>
+                    <meta name="viewport" content="width=device-width, initial-scale=1">
+                    <style>
+                        body { 
+                            font-family: Arial, sans-serif;
+                            max-width: 1000px; 
+                            margin: 0 auto; 
+                            padding: 20px;
+                            background: #0f0f23;
+                            color: #fff;
+                        }
+                        .container { background: #1a1a2e; padding: 30px; border-radius: 15px; }
+                        h1 { color: #ff6b35; border-bottom: 3px solid #ff6b35; padding-bottom: 15px; }
+                        .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin: 20px 0; }
+                        .stat-card { background: linear-gradient(135deg, #43cea2 0%, #185a9d 100%); padding: 20px; border-radius: 10px; text-align: center; }
+                        .stat-number { font-size: 2em; font-weight: bold; margin-bottom: 5px; }
+                        .manifest-url { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); padding: 20px; border-radius: 10px; margin: 20px 0; }
+                        .btn { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 25px; border: none; border-radius: 8px; text-decoration: none; display: inline-block; margin: 10px 5px; }
+                        ul { background: #16213e; padding: 20px; border-radius: 10px; margin: 15px 0; }
+                        li { margin: 10px 0; padding: 8px; background: rgba(255, 255, 255, 0.05); border-radius: 5px; }
+                        code { background: rgba(255, 255, 255, 0.1); padding: 4px 8px; border-radius: 4px; }
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <h1>🎬 Telegram Stream Server v3.0</h1>
+                        
+                        <div class="stats">
+                            <div class="stat-card">
+                                <div class="stat-number">${contentDatabase.movies.size}</div>
+                                <div>Movies</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-number">${contentDatabase.series.size}</div>
+                                <div>Series</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-number">${CONFIG.TELEGRAM_CHANNELS.length}</div>
+                                <div>Channels</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-number">${CONFIG.TELEGRAM_BOT_TOKEN ? '✅' : '❌'}</div>
+                                <div>Bot Status</div>
+                            </div>
+                        </div>
+                        
+                        <div class="manifest-url">
+                            <h3>📱 Install in Stremio:</h3>
+                            <p><code>${req.protocol}://${req.get('host')}/manifest.json</code></p>
+                        </div>
+
+                        <h3>🎬 Movies (${contentDatabase.movies.size}):</h3>
+                        <ul>${moviesList || '<li>No movies found. Add bot token and channels.</li>'}</ul>
+
+                        <h3>📺 Series (${contentDatabase.series.size}):</h3>
+                        <ul>${seriesList || '<li>No series found. Add bot token and channels.</li>'}</ul>
+
+                        <div style="text-align: center; margin-top: 40px;">
+                            <a href="/health" class="btn">Health Check</a>
+                            <button onclick="refresh()" class="btn">Refresh Content</button>
+                            <button onclick="showAddForm()" class="btn">Add Content Manually</button>
+                        </div>
+
+                        <div id="addForm" style="display:none; background: #16213e; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                            <h3>📝 Add Content Manually</h3>
+                            <p>Since auto-discovery from old messages is limited, you can add content manually:</p>
+                            <form onsubmit="addContent(event)">
+                                <div style="margin: 10px 0;">
+                                    <input type="text" id="contentName" placeholder="e.g., John Wick Chapter 2">
+                                </div>
+                                <div style="margin: 10px 0;">
+                                    <label>Year:</label>
+                                    <input type="text" id="contentYear" placeholder="e.g., 2017">
+                                </div>
+                                <div style="margin: 10px 0;">
+                                    <label>Type:</label>
+                                    <select id="contentType">
+                                        <option value="movie">Movie</option>
+                                        <option value="series">Series</option>
+                                    </select>
+                                </div>
+                                <div style="margin: 10px 0;">
+                                    <label>Telegram File ID:</label>
+                                    <input type="text" id="fileId" placeholder="Get from @userinfobot or message forward">
+                                    <small>Forward your video message to @userinfobot to get the file_id</small>
+                                </div>
+                                <div style="margin: 10px 0;">
+                                    <label>Channel ID:</label>
+                                    <input type="text" id="channelId" placeholder="e.g., -1001234567890">
+                                </div>
+                                <button type="submit" class="btn">Add Content</button>
+                            </form>
+                        </div>
+
+                        <script>
+                            async function refresh() {
+                                try {
+                                    const response = await fetch('/refresh', { method: 'POST' });
+                                    const data = await response.json();
+                                    alert('Refreshed! Movies: ' + data.movies + ', Series: ' + data.series);
+                                    location.reload();
+                                } catch (error) {
+                                    alert('Refresh failed: ' + error.message);
+                                }
+                            }
+
+                            function showAddForm() {
+                                const form = document.getElementById('addForm');
+                                form.style.display = form.style.display === 'none' ? 'block' : 'none';
+                            }
+
+                            async function addContent(event) {
+                                event.preventDefault();
+                                try {
+                                    const data = {
+                                        name: document.getElementById('contentName').value,
+                                        year: document.getElementById('contentYear').value,
+                                        type: document.getElementById('contentType').value,
+                                        fileId: document.getElementById('fileId').value,
+                                        channelId: document.getElementById('channelId').value,
+                                        fileName: document.getElementById('contentName').value + '.mkv'
+                                    };
+
+                                    const response = await fetch('/add-content', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify(data)
+                                    });
+
+                                    const result = await response.json();
+                                    if (result.success) {
+                                        alert('Content added successfully!');
+                                        location.reload();
+                                    } else {
+                                        alert('Error: ' + result.error);
+                                    }
+                                } catch (error) {
+                                    alert('Error adding content: ' + error.message);
+                                }
+                            }
+
+                            setInterval(() => fetch('/ping').catch(() => {}), 600000);
+                        </script>
+                    </div>
+                </body>
+                </html>
+            `);
+        });
+
+        // Serve addon manifest
+        app.get('/manifest.json', (req, res) => {
+            res.json(manifest);
+        });
+
+        // Use the addon middleware
+        try {
+            const addonInterface = this.addon.getInterface();
+            if (addonInterface && typeof addonInterface === 'function') {
+                app.use(addonInterface);
+                console.log('✅ Stremio SDK interface loaded');
+            }
+        } catch (error) {
+            console.error('Error setting up addon interface:', error);
+        }
+
+        return app;
+    }
+
+    start() {
+        try {
+            const app = this.getExpressApp();
+            
+            app.listen(CONFIG.PORT, () => {
+                console.log('🚀 Telegram Stream Server v3.0 running on port', CONFIG.PORT);
+                console.log('📚 Content:', contentDatabase.movies.size, 'movies,', contentDatabase.series.size, 'series');
+                console.log('🤖 Bot:', CONFIG.TELEGRAM_BOT_TOKEN ? 'Configured' : 'Not configured');
+                console.log('📺 Channels:', CONFIG.TELEGRAM_CHANNELS.length);
+                console.log('🔗 Manifest: http://localhost:' + CONFIG.PORT + '/manifest.json');
+            });
+        } catch (error) {
+            console.error('Error starting server:', error);
+            throw error;
+        }
+    }
+}
+
+// Initialize and start
+let addon;
+
+try {
+    addon = new TelegramStreamServer();
+} catch (error) {
+    console.error('Error initializing addon:', error);
+    process.exit(1);
+}
+
+// Export for testing
+module.exports = { TelegramStreamServer, CONFIG };
+
+// Start server
+if (require.main === module) {
+    try {
+        addon.start();
+    } catch (error) {
+        console.error('Error starting addon:', error);
+        process.exit(1);
+    }
+}
+                                    <input type="text" id="contentName" placeholder="e.g., John Wick Chapter 2" style="width: 100%; padding: 8px; margin: 5px 0;">
+                                </div>
+                                <div style="margin: 10px 0;">
+                                    <label>Year:</label>
+                                    <input type="text" id="contentYear" placeholder="e.g., 2017" style="width: 100%; padding: 8px; margin: 5px 0;">
+                                </div>
+                                <div style="margin: 10px 0;">
+                                    <label>Type:</label>
+                                    <select id="contentType" style="width: 100%; padding: 8px; margin: 5px 0;">
+                                        <option value="movie">Movie</option>
+                                        <option value="series">Series</option>
+                                    </select>
+                                </div>
+                                <div style="margin: 10px 0;">
+                                    <label>Telegram File ID:</label>
+                                    <input type="text" id="fileId" placeholder="Get from @userinfobot or message forward" style="width: 100%; padding: 8px; margin: 5px 0;">
+                                    <small>Forward your video message to @userinfobot to get the file_id</small>
+                                </div>
+                                <div style="margin: 10px 0;">
+                                    <label>Channel ID:</label>
+                                    <input type="text" id="channelId" placeholder="e.g., -1001234567890" style="width: 100%; padding: 8px; margin: 5px 0;">
+                                </div>
+                                <button type="submit" class="btn">Add Content</button>
+                            </form>
+                        </div>
+
+                        <script>
+                            async function refresh() {
+                                try {
+                                    const response = await fetch('/refresh', { method: 'POST' });
+                                    const data = await response.json();
+                                    alert('Refreshed! Movies: ' + data.movies + ', Series: ' + data.series);
+                                    location.reload();
+                                } catch (error) {
+                                    alert('Refresh failed: ' + error.message);
+                                }
+                            }
+
+                            function showAddForm() {
+                                const form = document.getElementById('addForm');
+                                form.style.display = form.style.display === 'none' ? 'block' : 'none';
+                            }
+
+                            async function addContent(event) {
+                                event.preventDefault();
+                                try {
+                                    const data = {
+                                        name: document.getElementById('contentName').value,
+                                        year: document.getElementById('contentYear').value,
+                                        type: document.getElementById('contentType').value,
+                                        fileId: document.getElementById('fileId').value,
+                                        channelId: document.getElementById('channelId').value,
+                                        fileName: document.getElementById('contentName').value + '.mkv'
+                                    };
+
+                                    const response = await fetch('/add-content', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify(data)
+                                    });
+
+                                    const result = await response.json();
+                                    if (result.success) {
+                                        alert('Content added successfully!');
+                                        location.reload();
+                                    } else {
+                                        alert('Error: ' + result.error);
+                                    }
+                                } catch (error) {
+                                    alert('Error adding content: ' + error.message);
+                                }
+                            }
+
+                            setInterval(() => fetch('/ping').catch(() => {}), 600000);
+                        </script>
+                    </div>
+                </body>
+                </html>
+            `);
+        });
+
+        // Serve addon manifest
+        app.get('/manifest.json', (req, res) => {
+            res.json(manifest);
+        });
+
+        // Use the addon middleware
+        try {
+            const addonInterface = this.addon.getInterface();
+            if (addonInterface && typeof addonInterface === 'function') {
+                app.use(addonInterface);
+                console.log('✅ Stremio SDK interface loaded');
+            }
+        } catch (error) {
+            console.error('Error setting up addon interface:', error);
+        }
+
+        return app;
+    }
+
+    start() {
+        try {
+            const app = this.getExpressApp();
+            
+            app.listen(CONFIG.PORT, () => {
+                console.log(`🚀 Telegram Stream Server v3.0 running on port ${CONFIG.PORT}`);
+                console.log(`📚 Content: ${contentDatabase.movies.size} movies, ${contentDatabase.series.size} series`);
+                console.log(`🤖 Bot: ${CONFIG.TELEGRAM_BOT_TOKEN ? 'Configured' : 'Not configured'}`);
+                console.log(`📺 Channels: ${CONFIG.TELEGRAM_CHANNELS.length}`);
+                console.log(`🔗 Manifest: http://localhost:${CONFIG.PORT}/manifest.json`);
+            });
+        } catch (error) {
+            console.error('Error starting server:', error);
+            throw error;
+        }
+    }
+}
+
+// Initialize and start
+let addon;
+
+try {
+    addon = new TelegramStreamServer();
+} catch (error) {
+    console.error('Error initializing addon:', error);
+    process.exit(1);
+}
+
+// Export for testing
+module.exports = { TelegramStreamServer, CONFIG };
+
+// Start server
+if (require.main === module) {
+    try {
+        addon.start();
+    } catch (error) {
+        console.error('Error starting addon:', error);
+        process.exit(1);
+    }
+                    }
