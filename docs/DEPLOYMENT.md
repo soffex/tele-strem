@@ -315,4 +315,337 @@ pm2 save
 # Create Nginx config
 sudo nano /etc/nginx/sites-available/telegram-stremio
 
-# Ad
+# Add this configuration:
+server {
+    listen 80;
+    server_name your-domain.com;
+
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        proxy_read_timeout 300s;
+        proxy_connect_timeout 75s;
+    }
+    
+    location /health {
+        proxy_pass http://localhost:3000/health;
+        access_log off;
+    }
+}
+
+# Enable site
+sudo ln -s /etc/nginx/sites-available/telegram-stremio /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+#### 4. Setup SSL Certificate
+```bash
+# Get SSL certificate
+sudo certbot --nginx -d your-domain.com
+
+# Test automatic renewal
+sudo certbot renew --dry-run
+
+# Check certificate
+curl -I https://your-domain.com/health
+```
+
+#### 5. Configure Firewall
+```bash
+# Setup UFW firewall
+sudo ufw allow ssh
+sudo ufw allow 'Nginx Full'
+sudo ufw enable
+sudo ufw status
+```
+
+#### 6. Setup Monitoring
+```bash
+# Create log rotation
+sudo nano /etc/logrotate.d/telegram-stremio
+
+# Add content:
+/home/appuser/.pm2/logs/*.log {
+    daily
+    missingok
+    rotate 7
+    compress
+    delaycompress
+    notifempty
+    copytruncate
+    su appuser appuser
+}
+
+# Setup system monitoring
+pm2 install pm2-logrotate
+pm2 set pm2-logrotate:max_size 10M
+pm2 set pm2-logrotate:compress true
+```
+
+---
+
+## ☁️ Alternative Free Platforms
+
+### Railway (Limited Free Tier)
+```bash
+# Install Railway CLI
+npm install -g @railway/cli
+
+# Login and deploy
+railway login
+railway init
+railway up
+```
+⚠️ **Note**: Railway only offers $5 one-time credit now.
+
+### Netlify (Functions)
+```bash
+# Install Netlify CLI
+npm install -g netlify-cli
+
+# Create netlify.toml (already included in repo)
+# Deploy
+netlify deploy --prod --dir .
+```
+
+### Heroku (No longer free)
+```bash
+# Install Heroku CLI
+# Create app
+heroku create your-app-name
+
+# Set environment variables
+heroku config:set TELEGRAM_BOT_TOKENS="token1,token2"
+heroku config:set TELEGRAM_CHANNELS="@channel1,@channel2"
+
+# Deploy
+git push heroku main
+```
+⚠️ **Note**: Heroku ended their free tier in November 2022.
+
+---
+
+## 📊 Deployment Comparison
+
+| Platform | Free Tier | Setup Time | Reliability | Best For |
+|----------|-----------|------------|-------------|----------|
+| **Render** ⭐ | 750hrs/month | 5 minutes | 99.9% | **Production** |
+| **Vercel** | 1M requests | 3 minutes | 99.9% | **API-focused** |
+| **Fly.io** | 3 VMs | 10 minutes | 99.5% | **Advanced users** |
+| **VPS** | Varies | 30 minutes | 99.9% | **Full control** |
+| **Docker** | Host cost | 5 minutes | Depends | **Containers** |
+
+---
+
+## 🔧 Post-Deployment Setup
+
+### 1. Verify Deployment
+```bash
+# Check health endpoint
+curl https://your-app.domain.com/health
+
+# Expected response:
+{
+  "status": "ok",
+  "channels": 3,
+  "bots": 5,
+  "cache_size": 0,
+  "bot_stats": {
+    "bot_1": {
+      "requests_this_minute": 0,
+      "limit": 20
+    }
+  }
+}
+```
+
+### 2. Test Bot Configuration
+```bash
+# Check configuration page
+curl https://your-app.domain.com/configure
+
+# Should show:
+# - Bot tokens configured
+# - Channels listed
+# - Bot usage statistics
+```
+
+### 3. Install in Stremio
+1. Copy your manifest URL: `https://your-app.domain.com/manifest.json`
+2. Open Stremio
+3. Go to Addons → Community Addons
+4. Click "Add Addon" or "+"
+5. Paste your manifest URL
+6. Click "Install"
+7. Wait for confirmation
+
+### 4. Test Streaming
+1. Search for a movie that exists in your channels
+2. Click on the movie
+3. Look for streams with "📺" icon (your addon)
+4. Click a stream to test playback
+
+---
+
+## 🚨 Troubleshooting Deployments
+
+### Common Issues:
+
+#### Build Failures
+```bash
+# Check Node.js version
+node --version  # Should be 16+ or 18+
+
+# Clear npm cache
+npm cache clean --force
+
+# Delete node_modules and reinstall
+rm -rf node_modules package-lock.json
+npm install
+```
+
+#### Environment Variables Not Working
+```bash
+# Check if variables are set
+echo $TELEGRAM_BOT_TOKENS
+
+# For Render: Check Environment tab in dashboard
+# For Vercel: Check Project Settings → Environment Variables
+# For Fly.io: Use `flyctl secrets list`
+```
+
+#### Health Check Failing
+```bash
+# Test locally
+curl http://localhost:3000/health
+
+# Check logs
+# Render: View logs in dashboard
+# Vercel: `vercel logs`
+# Fly.io: `flyctl logs`
+# VPS: `pm2 logs telegram-stremio`
+```
+
+#### Bot Permission Errors
+```bash
+# Test bot tokens manually
+curl -X GET "https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getMe"
+
+# Should return bot information
+# If error, check token with @BotFather
+```
+
+#### Rate Limit Issues
+```bash
+# Check bot usage at /health endpoint
+curl https://your-app.domain.com/health
+
+# If bots hitting limits:
+# - Add more bot tokens
+# - Increase RATE_LIMIT_DELAY
+# - Decrease MAX_REQUESTS_PER_BOT_PER_MINUTE
+```
+
+### Getting Help:
+1. 📊 Check application logs
+2. 🔍 Test individual components
+3. 📋 Review environment variables
+4. 🤔 Compare with working deployments
+5. 🐛 Create GitHub issue with logs
+
+---
+
+## 🔄 Updates and Maintenance
+
+### Updating Your Deployment:
+
+#### Render (Auto-deploy)
+```bash
+# Just push to GitHub
+git add .
+git commit -m "Update addon"
+git push origin main
+# Render automatically deploys!
+```
+
+#### Vercel
+```bash
+# Auto-deploy on git push, or manual:
+vercel --prod
+```
+
+#### Fly.io
+```bash
+# Deploy updates
+flyctl deploy
+```
+
+#### VPS/Docker
+```bash
+# Pull updates
+git pull origin main
+
+# Restart application
+pm2 restart telegram-stremio
+
+# Or with Docker
+docker-compose pull
+docker-compose up -d
+```
+
+### Monitoring Your Deployment:
+- Set up uptime monitoring (UptimeRobot, Pingdom)
+- Monitor `/health` endpoint regularly
+- Check logs for errors
+- Update dependencies monthly
+- Backup configuration files
+
+---
+
+## 🎉 Success Checklist
+
+- [ ] ✅ Repository forked and cloned
+- [ ] 🤖 Multiple bots created (3-5 recommended)
+- [ ] 📺 Bots added to channels as admins
+- [ ] ☁️ Platform chosen and account created
+- [ ] 🔧 Environment variables configured
+- [ ] 🚀 Application deployed successfully
+- [ ] 🏥 Health endpoint returning "ok"
+- [ ] 📱 Addon installed in Stremio
+- [ ] 🎬 Test streams working
+- [ ] 📊 Monitoring set up
+
+**Congratulations! Your Telegram Stremio addon is live!** 🎊
+
+---
+
+## 💡 Pro Tips
+
+### Performance Optimization:
+- Use **5 bot tokens** for maximum speed
+- Set `RATE_LIMIT_DELAY=800` for faster requests
+- Deploy in region closest to your users
+- Use CDN if serving global users
+
+### Security Best Practices:
+- Never commit `.env` files to Git
+- Rotate bot tokens periodically
+- Use environment variables for all secrets
+- Enable HTTPS/SSL in production
+- Monitor for unusual activity
+
+### Cost Optimization:
+- Start with free tiers
+- Monitor usage and scale accordingly
+- Use auto-sleep features when possible
+- Consider VPS for heavy usage (>750hrs/month)
+
+**Happy streaming!** 🚀🎬
