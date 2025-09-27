@@ -413,6 +413,16 @@ class TelegramStreamsAddon {
         app.use(cors());
         app.use(express.json());
 
+        // Keep-alive endpoint to prevent sleeping
+        app.get('/ping', (req, res) => {
+            res.json({ status: 'alive', timestamp: new Date().toISOString() });
+        });
+
+        // Root endpoint
+        app.get('/', (req, res) => {
+            res.redirect('/configure');
+        });
+
         // Serve addon manifest
         app.get('/manifest.json', (req, res) => {
             res.json(manifest);
@@ -440,98 +450,176 @@ class TelegramStreamsAddon {
 
             res.send(`
                 <html>
-                    <head><title>Telegram Streams Configuration</title></head>
+                    <head>
+                        <title>Telegram Streams Configuration</title>
+                        <meta name="viewport" content="width=device-width, initial-scale=1">
+                        <style>
+                            body { 
+                                font-family: Arial, sans-serif; 
+                                max-width: 800px; 
+                                margin: 0 auto; 
+                                padding: 20px;
+                                background: #f5f5f5;
+                            }
+                            .container {
+                                background: white;
+                                padding: 30px;
+                                border-radius: 10px;
+                                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+                            }
+                            h1 { color: #333; border-bottom: 2px solid #007bff; padding-bottom: 10px; }
+                            h2, h3 { color: #555; }
+                            .status { 
+                                padding: 15px; 
+                                border-radius: 5px; 
+                                margin: 15px 0;
+                                background: #d4edda;
+                                border: 1px solid #c3e6cb;
+                                color: #155724;
+                            }
+                            .error {
+                                background: #f8d7da;
+                                border: 1px solid #f5c6cb;
+                                color: #721c24;
+                            }
+                            .manifest-url {
+                                background: #e3f2fd;
+                                padding: 15px;
+                                border-radius: 5px;
+                                margin: 15px 0;
+                                border-left: 4px solid #2196f3;
+                                font-family: monospace;
+                                word-break: break-all;
+                            }
+                            ul { padding-left: 20px; }
+                            li { margin: 5px 0; }
+                            code { 
+                                background: #f8f9fa; 
+                                padding: 2px 5px; 
+                                border-radius: 3px;
+                                font-family: monospace;
+                            }
+                        </style>
+                    </head>
                     <body>
-                        <h1>Telegram Streams Addon</h1>
-                        <h2>Configuration</h2>
-                        <p><strong>Bot Tokens:</strong> ${CONFIG.TELEGRAM_BOT_TOKENS.length} configured</p>
-                        <p><strong>Channels:</strong> ${CONFIG.TELEGRAM_CHANNELS.join(', ') || 'None configured'}</p>
-                        <p><strong>Cache entries:</strong> ${cache.size}</p>
-                        <p><strong>Rate Limit Delay:</strong> ${CONFIG.RATE_LIMIT_DELAY}ms</p>
-                        <p><strong>Max Requests per Bot/Minute:</strong> ${CONFIG.MAX_REQUESTS_PER_BOT_PER_MINUTE}</p>
-                        
-                        <h3>Bot Usage Stats:</h3>
-                        <ul>
-                            ${botStatsHtml}
-                        </ul>
-                        
-                        <h3>Setup Instructions:</h3>
-                        <ol>
-                            <li>Create multiple Telegram bots using @BotFather for better rate limits</li>
-                            <li>Add all bots to your movie/series channels as admin</li>
-                            <li>Set TELEGRAM_BOT_TOKENS environment variable (comma-separated)</li>
-                            <li>Set TELEGRAM_CHANNELS environment variable (comma-separated channel IDs)</li>
-                        </ol>
-                        
-                        <h3>Rate Limiting:</h3>
-                        <ul>
-                            <li>Uses multiple bots to distribute requests</li>
-                            <li>Automatic retry with exponential backoff</li>
-                            <li>Smart rate limit detection and handling</li>
-                            <li>Current delay between requests: ${CONFIG.RATE_LIMIT_DELAY}ms</li>
-                        </ul>
-                        
-                        <h3>Install in Stremio:</h3>
-                        <p>Add this URL to Stremio: <code>${req.protocol}://${req.get('host')}/manifest.json</code></p>
+                        <div class="container">
+                            <h1>🎬 Telegram Streams Addon</h1>
+                            
+                            <div class="status ${CONFIG.TELEGRAM_BOT_TOKENS.length === 0 ? 'error' : ''}">
+                                <h2>📊 Current Status</h2>
+                                <p><strong>Bot Tokens:</strong> ${CONFIG.TELEGRAM_BOT_TOKENS.length} configured</p>
+                                <p><strong>Channels:</strong> ${CONFIG.TELEGRAM_CHANNELS.join(', ') || 'None configured'}</p>
+                                <p><strong>Cache entries:</strong> ${cache.size}</p>
+                                <p><strong>Rate Limit Delay:</strong> ${CONFIG.RATE_LIMIT_DELAY}ms</p>
+                                <p><strong>Max Requests per Bot/Minute:</strong> ${CONFIG.MAX_REQUESTS_PER_BOT_PER_MINUTE}</p>
+                            </div>
+                            
+                            <div class="manifest-url">
+                                <h3>📱 Install in Stremio:</h3>
+                                <p><strong>Manifest URL:</strong></p>
+                                <p><code>${req.protocol}://${req.get('host')}/manifest.json</code></p>
+                                <p><small>Copy this URL and paste it in Stremio → Addons → Install from URL</small></p>
+                            </div>
+
+                            <h3>🤖 Bot Usage Stats:</h3>
+                            <ul>
+                                ${botStatsHtml || '<li>No bot statistics available</li>'}
+                            </ul>
+                            
+                            <h3>🔧 Setup Instructions:</h3>
+                            <ol>
+                                <li>Create multiple Telegram bots using @BotFather for better rate limits</li>
+                                <li>Add all bots to your movie/series channels as admin</li>
+                                <li>Set TELEGRAM_BOT_TOKENS environment variable (comma-separated)</li>
+                                <li>Set TELEGRAM_CHANNELS environment variable (comma-separated channel IDs)</li>
+                            </ol>
+                            
+                            <h3>⚡ Rate Limiting Features:</h3>
+                            <ul>
+                                <li>Uses multiple bots to distribute requests</li>
+                                <li>Automatic retry with exponential backoff</li>
+                                <li>Smart rate limit detection and handling</li>
+                                <li>Current delay between requests: ${CONFIG.RATE_LIMIT_DELAY}ms</li>
+                            </ul>
+
+                            <h3>🔗 Test Endpoints:</h3>
+                            <ul>
+                                <li><a href="/health">/health</a> - Health check</li>
+                                <li><a href="/manifest.json">/manifest.json</a> - Stremio manifest</li>
+                                <li><a href="/ping">/ping</a> - Keep-alive ping</li>
+                            </ul>
+                        </div>
+
+                        <script>
+                            // Keep the service alive by pinging every 10 minutes
+                            setInterval(() => {
+                                fetch('/ping').catch(() => {});
+                            }, 600000); // 10 minutes
+                        </script>
                     </body>
                 </html>
             `);
         });
 
-        // Use the addon middleware - handle potential undefined
+        // Stream endpoints - multiple formats for compatibility
+        const streamHandler = async (req, res) => {
+            try {
+                const { type, id } = req.params;
+                console.log(`Stream request: ${type}/${id}`);
+                
+                // Remove .json extension if present
+                const cleanId = id.replace('.json', '');
+                
+                const streams = await this.searchStreams(cleanId, type);
+                console.log(`Found ${streams.length} streams for ${cleanId}`);
+                
+                res.json({ streams });
+            } catch (error) {
+                console.error('Stream endpoint error:', error);
+                res.status(500).json({ streams: [], error: error.message });
+            }
+        };
+
+        // Register stream endpoints in multiple formats
+        app.get('/stream/:type/:id.json', streamHandler);
+        app.get('/stream/:type/:id', streamHandler);
+        app.get('/:type/:id.json', streamHandler);
+        app.get('/:type/:id', streamHandler);
+
+        // Try to use the addon SDK interface as fallback
         try {
             const addonInterface = this.addon.getInterface();
             if (addonInterface && typeof addonInterface === 'function') {
                 app.use(addonInterface);
+                console.log('✅ Stremio SDK interface loaded successfully');
             } else {
-                // Manual stream endpoint if getInterface() fails
-                app.get('/stream/:type/:id.json', async (req, res) => {
-                    try {
-                        const { type, id } = req.params;
-                        const streams = await this.searchStreams(id, type);
-                        res.json({ streams });
-                    } catch (error) {
-                        console.error('Stream endpoint error:', error);
-                        res.json({ streams: [] });
-                    }
-                });
-                
-                app.get('/stream/:type/:id', async (req, res) => {
-                    try {
-                        const { type, id } = req.params;
-                        const streams = await this.searchStreams(id, type);
-                        res.json({ streams });
-                    } catch (error) {
-                        console.error('Stream endpoint error:', error);
-                        res.json({ streams: [] });
-                    }
-                });
+                console.log('⚠️ Stremio SDK interface not available, using manual endpoints');
             }
         } catch (error) {
             console.error('Error setting up addon interface:', error);
-            // Fallback manual endpoints
-            app.get('/stream/:type/:id.json', async (req, res) => {
-                try {
-                    const { type, id } = req.params;
-                    const streams = await this.searchStreams(id, type);
-                    res.json({ streams });
-                } catch (error) {
-                    console.error('Stream endpoint error:', error);
-                    res.json({ streams: [] });
-                }
-            });
-            
-            app.get('/stream/:type/:id', async (req, res) => {
-                try {
-                    const { type, id } = req.params;
-                    const streams = await this.searchStreams(id, type);
-                    res.json({ streams });
-                } catch (error) {
-                    console.error('Stream endpoint error:', error);
-                    res.json({ streams: [] });
-                }
-            });
+            console.log('🔄 Using fallback manual endpoints');
         }
+
+        // Catch-all for debugging
+        app.use((req, res, next) => {
+            console.log(`📝 Request: ${req.method} ${req.path}`);
+            next();
+        });
+
+        // 404 handler
+        app.use((req, res) => {
+            res.status(404).json({ 
+                error: 'Not Found', 
+                message: `Path ${req.path} not found`,
+                availableEndpoints: [
+                    '/manifest.json',
+                    '/health',
+                    '/configure',
+                    '/stream/:type/:id',
+                    '/ping'
+                ]
+            });
+        });
 
         return app;
     }
@@ -577,4 +665,4 @@ if (require.main === module) {
         console.error('Error starting addon:', error);
         process.exit(1);
     }
-    }
+                }
