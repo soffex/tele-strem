@@ -1,6 +1,6 @@
 # 🎬 Telegram Stremio Addon
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/YOUR_USERNAME/telegram-stremio-addon)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/soffex/tele-strem.git)
 
 **Stream movies and series from your Telegram channels directly to Stremio.**
 
@@ -142,7 +142,7 @@ The addon will automatically:
 
 ```bash
 # Clone your forked repository
-git clone https://github.com/YOUR_USERNAME/telegram-stremio-addon.git
+git clone https://github.com/soffex/tele-strem.git
 cd telegram-stremio-addon
 
 # Install dependencies
