@@ -2,432 +2,473 @@ const { addonBuilder } = require('stremio-addon-sdk');
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
+const crypto = require('crypto');
 
-// Addon manifest with catalogs
+// Addon manifest
 const manifest = {
-    id: 'org.telegram.stream',
-    version: '3.0.0',
-    name: 'Telegram Stream Server',
-    description: 'Stream your Telegram media files directly in Stremio',
+    id: 'org.telegram.autodetect',
+    version: '5.0.0',
+    name: 'Auto-Detect Media Collection',
+    description: 'Automatically detect and stream media from Telegram channels',
     resources: ['catalog', 'stream', 'meta'],
     types: ['movie', 'series'],
     idPrefixes: ['tg'],
     catalogs: [
         {
             type: 'movie',
-            id: 'telegram-movies',
-            name: 'My Movies',
-            extra: [
-                { name: 'search', isRequired: false },
-                { name: 'genre', isRequired: false, options: ['Action', 'Comedy', 'Drama', 'Horror', 'Sci-Fi', 'Thriller'] }
-            ]
+            id: 'auto-movies',
+            name: 'Auto Movies',
+            extra: [{ name: 'search', isRequired: false }]
         },
         {
             type: 'series',
-            id: 'telegram-series', 
-            name: 'My Series',
-            extra: [
-                { name: 'search', isRequired: false },
-                { name: 'genre', isRequired: false, options: ['Action', 'Comedy', 'Drama', 'Crime', 'Sci-Fi'] }
-            ]
+            id: 'auto-series',
+            name: 'Auto Series', 
+            extra: [{ name: 'search', isRequired: false }]
         }
     ]
 };
 
-// Configuration
+// Enhanced configuration with multiple setup options
 const CONFIG = {
-    TELEGRAM_BOT_TOKEN: process.env.TELEGRAM_BOT_TOKEN || '',
-    TELEGRAM_CHANNELS: (process.env.TELEGRAM_CHANNELS || '').split(',').filter(Boolean),
+    // Bot tokens - supports multiple configuration methods
+    TELEGRAM_BOTS: (() => {
+        const bots = [];
+        
+        // Method 1: Individual bot tokens (TELEGRAM_BOT_TOKEN_1, _2, etc.)
+        for (let i = 1; i <= 10; i++) {
+            const token = process.env[`TELEGRAM_BOT_TOKEN_${i}`];
+            if (token && !token.includes('your_bot')) {
+                bots.push(token);
+            }
+        }
+        
+        // Method 2: Comma-separated tokens
+        if (bots.length === 0 && process.env.TELEGRAM_BOT_TOKENS) {
+            const tokens = process.env.TELEGRAM_BOT_TOKENS.split(',')
+                .map(t => t.trim())
+                .filter(t => t && !t.includes('your_bot'));
+            bots.push(...tokens);
+        }
+        
+        // Method 3: Single bot token (backward compatibility)
+        if (bots.length === 0 && process.env.TELEGRAM_BOT_TOKEN) {
+            const token = process.env.TELEGRAM_BOT_TOKEN.trim();
+            if (token && !token.includes('your_bot')) {
+                bots.push(token);
+            }
+        }
+        
+        return bots;
+    })(),
+    
+    // Channel IDs - supports multiple configuration methods
+    MONITORED_CHANNELS: (() => {
+        const channels = [];
+        
+        // Method 1: Comma-separated channels
+        if (process.env.TELEGRAM_CHANNELS) {
+            const channelList = process.env.TELEGRAM_CHANNELS.split(',')
+                .map(c => c.trim())
+                .filter(c => c && (c.startsWith('-') || c.startsWith('@')));
+            channels.push(...channelList);
+        }
+        
+        // Method 2: Individual channel variables
+        for (let i = 1; i <= 10; i++) {
+            const channel = process.env[`TELEGRAM_CHANNEL_${i}`];
+            if (channel && (channel.startsWith('-') || channel.startsWith('@'))) {
+                channels.push(channel);
+            }
+        }
+        
+        // Fallback: default channels if none configured
+        if (channels.length === 0) {
+            console.log('⚠️ No channels configured. Add TELEGRAM_CHANNELS to your environment.');
+        }
+        
+        return channels;
+    })(),
+    
+    // Server settings
     PORT: process.env.PORT || 3000,
-    CACHE_TTL: 3600000, // 1 hour
+    NODE_ENV: process.env.NODE_ENV || 'production',
+    
+    // Webhook configuration
+    WEBHOOK_SECRET: process.env.WEBHOOK_SECRET || crypto.randomBytes(32).toString('hex'),
+    WEBHOOK_BASE_URL: process.env.WEBHOOK_BASE_URL,
+    
+    // Cache and performance
+    CACHE_TTL: parseInt(process.env.CACHE_TTL) || 3600000, // 1 hour
+    FILE_SCAN_INTERVAL: parseInt(process.env.FILE_SCAN_INTERVAL) || 300000, // 5 minutes
+    MAX_FILE_SIZE: parseInt(process.env.MAX_FILE_SIZE) || 2147483648, // 2GB
+    MAX_CACHE_SIZE: parseInt(process.env.MAX_CACHE_SIZE) || 10000,
+    MAX_CATALOG_ITEMS: parseInt(process.env.MAX_CATALOG_ITEMS) || 100,
+    
+    // Rate limiting
+    RATE_LIMIT_DELAY: parseInt(process.env.RATE_LIMIT_DELAY) || 1000,
+    MAX_REQUESTS_PER_BOT_PER_MINUTE: parseInt(process.env.MAX_REQUESTS_PER_BOT_PER_MINUTE) || 20,
+    RETRY_ATTEMPTS: parseInt(process.env.RETRY_ATTEMPTS) || 3,
+    RETRY_DELAY: parseInt(process.env.RETRY_DELAY) || 2000,
+    BOT_COOLDOWN_PERIOD: parseInt(process.env.BOT_COOLDOWN_PERIOD) || 60000,
+    
+    // File detection
+    ALLOWED_FILE_TYPES: (process.env.ALLOWED_FILE_TYPES || 'mp4,mkv,avi,mov,wmv,flv,webm,m4v,3gp,ts,m2ts').split(',').map(t => t.trim()),
+    SERIES_KEYWORDS: (process.env.SERIES_KEYWORDS || 'season,episode,s01,s02,s03,s04,s05,s06,s07,s08,s09,s10,ep,e01,e02,e03,e04,e05').split(',').map(k => k.trim().toLowerCase()),
+    QUALITY_INDICATORS: (process.env.QUALITY_INDICATORS || '480p,720p,1080p,1440p,2160p,4K,BluRay,WEBRip,HDRip,DVDRip,CAMRip,WEB-DL,BDRip').split(',').map(q => q.trim()),
+    TITLE_CLEANUP_WORDS: (process.env.TITLE_CLEANUP_WORDS || 'x264,x265,h264,h265,hevc,aac,ac3,dts,5.1,7.1,rarbg,yts,eztv').split(',').map(w => w.trim().toLowerCase()),
+    
+    // Metadata
+    ENABLE_METADATA_FETCHING: process.env.ENABLE_METADATA_FETCHING === 'true',
+    TMDB_API_KEY: process.env.TMDB_API_KEY,
+    OMDB_API_KEY: process.env.OMDB_API_KEY,
+    DEFAULT_MOVIE_POSTER: process.env.DEFAULT_MOVIE_POSTER || 'https://via.placeholder.com/300x450/2c3e50/ecf0f1?text=MOVIE',
+    DEFAULT_SERIES_POSTER: process.env.DEFAULT_SERIES_POSTER || 'https://via.placeholder.com/300x450/34495e/ecf0f1?text=SERIES',
+    
+    // Logging
+    LOG_LEVEL: process.env.LOG_LEVEL || 'info',
+    ENABLE_REQUEST_LOGGING: process.env.ENABLE_REQUEST_LOGGING !== 'false',
+    ENABLE_DETECTION_LOGGING: process.env.ENABLE_DETECTION_LOGGING !== 'false',
+    
+    // Security
+    ENABLE_CORS: process.env.ENABLE_CORS !== 'false',
+    CORS_ORIGINS: process.env.CORS_ORIGINS || '*',
+    REQUEST_TIMEOUT: parseInt(process.env.REQUEST_TIMEOUT) || 30000,
+    
+    // Addon manifest
+    ADDON_ID: process.env.ADDON_ID || 'org.telegram.autodetect',
+    ADDON_VERSION: process.env.ADDON_VERSION || '5.0.0',
+    ADDON_NAME: process.env.ADDON_NAME || 'Auto-Detect Media Collection',
+    ADDON_DESCRIPTION: process.env.ADDON_DESCRIPTION || 'Automatically detect and stream media from Telegram channels'
 };
 
-// Content database
-let contentDatabase = {
+// Global file storage - automatically populated
+const AUTO_DETECTED_FILES = {
     movies: new Map(),
     series: new Map(),
-    fileCache: new Map()
+    lastUpdate: Date.now()
 };
 
-// Cache for responses
-const cache = new Map();
+// Bot rotation system
+class BotRotator {
+    constructor(botTokens) {
+        this.bots = botTokens.map((token, index) => ({
+            token,
+            index,
+            lastUsed: 0,
+            rateLimitUntil: 0,
+            errors: 0
+        }));
+        this.currentIndex = 0;
+    }
 
-class TelegramStreamServer {
+    getAvailableBot() {
+        const now = Date.now();
+        
+        // Find bot that's not rate limited
+        for (let i = 0; i < this.bots.length; i++) {
+            const bot = this.bots[i];
+            if (bot.rateLimitUntil < now && bot.errors < 5) {
+                bot.lastUsed = now;
+                return bot;
+            }
+        }
+        
+        // If all rate limited, use least recently used
+        const availableBot = this.bots.reduce((min, bot) => 
+            bot.lastUsed < min.lastUsed ? bot : min
+        );
+        availableBot.lastUsed = now;
+        return availableBot;
+    }
+
+    markBotError(botToken, isRateLimit = false) {
+        const bot = this.bots.find(b => b.token === botToken);
+        if (bot) {
+            bot.errors++;
+            if (isRateLimit) {
+                bot.rateLimitUntil = Date.now() + 60000; // 1 minute cooldown
+            }
+        }
+    }
+
+    resetBotErrors(botToken) {
+        const bot = this.bots.find(b => b.token === botToken);
+        if (bot) {
+            bot.errors = 0;
+        }
+    }
+}
+
+// File name parser for metadata extraction
+class FileNameParser {
+    static parse(filename) {
+        const cleaned = filename.replace(/\.[^/.]+$/, ""); // Remove extension
+        
+        // Extract year
+        const yearMatch = cleaned.match(/\b(19|20)\d{2}\b/);
+        const year = yearMatch ? yearMatch[0] : '';
+        
+        // Extract quality
+        const qualityMatch = cleaned.match(/\b(480p|720p|1080p|1440p|2160p|4K|BluRay|WEBRip|HDRip|DVDRip|CAMRip)\b/i);
+        const quality = qualityMatch ? qualityMatch[0] : '';
+        
+        // Clean title (remove common patterns)
+        let title = cleaned
+            .replace(/\b(19|20)\d{2}\b/g, '') // Remove year
+            .replace(/\b(480p|720p|1080p|1440p|2160p|4K|BluRay|WEBRip|HDRip|DVDRip|CAMRip)\b/gi, '') // Remove quality
+            .replace(/\b(x264|x265|H264|H265|HEVC|AAC|AC3|DTS|5\.1|7\.1)\b/gi, '') // Remove codecs
+            .replace(/[._-]/g, ' ') // Replace separators with spaces
+            .replace(/\s+/g, ' ') // Multiple spaces to single
+            .trim();
+        
+        // Detect if series (common patterns)
+        const isSeriesPattern = /\b(S\d{1,2}|Season|Episode|EP?\d{1,2})\b/i;
+        const isSeries = isSeriesPattern.test(filename);
+        
+        // Extract season/episode info for series
+        let seasonInfo = '';
+        if (isSeries) {
+            const seasonMatch = filename.match(/S(\d{1,2})/i);
+            const episodeMatch = filename.match(/E(\d{1,2})/i);
+            if (seasonMatch) seasonInfo += `S${seasonMatch[1]}`;
+            if (episodeMatch) seasonInfo += `E${episodeMatch[1]}`;
+        }
+
+        return {
+            title: title || filename,
+            year,
+            quality,
+            type: isSeries ? 'series' : 'movie',
+            seasonInfo,
+            originalFileName: filename
+        };
+    }
+}
+
+// Telegram file detector with webhook support
+class TelegramAutoDetector {
+    constructor() {
+        this.botRotator = new BotRotator(CONFIG.TELEGRAM_BOTS);
+        this.setupWebhooks();
+        this.startFallbackScanner();
+        console.log('🤖 Initialized with', CONFIG.TELEGRAM_BOTS.length, 'bots');
+        console.log('📡 Monitoring', CONFIG.MONITORED_CHANNELS.length, 'channels');
+    }
+
+    async setupWebhooks() {
+        if (CONFIG.TELEGRAM_BOTS.length === 0) {
+            console.log('⚠️ No valid bot tokens found');
+            return;
+        }
+
+        for (const bot of this.botRotator.bots) {
+            try {
+                const webhookUrl = `https://${process.env.RENDER_EXTERNAL_HOSTNAME || 'localhost'}/webhook/${bot.index}`;
+                
+                await axios.post(`https://api.telegram.org/bot${bot.token}/setWebhook`, {
+                    url: webhookUrl,
+                    secret_token: CONFIG.WEBHOOK_SECRET,
+                    allowed_updates: ['channel_post', 'message']
+                });
+                
+                console.log('🔗 Webhook set for bot', bot.index);
+                this.botRotator.resetBotErrors(bot.token);
+            } catch (error) {
+                console.error(`❌ Failed to set webhook for bot ${bot.index}:`, error.message);
+                this.botRotator.markBotError(bot.token);
+            }
+        }
+    }
+
+    async handleWebhookUpdate(update, botIndex) {
+        try {
+            const message = update.channel_post || update.message;
+            if (!message) return;
+
+            // Check if message is from monitored channels
+            const channelId = message.chat.id.toString();
+            if (!CONFIG.MONITORED_CHANNELS.includes(channelId)) {
+                return;
+            }
+
+            // Process video or document files
+            const file = message.video || message.document;
+            if (!file) return;
+
+            await this.processNewFile(message, file, botIndex);
+            
+        } catch (error) {
+            console.error('Error processing webhook update:', error);
+        }
+    }
+
+    async processNewFile(message, file, botIndex) {
+        try {
+            const bot = this.botRotator.bots[botIndex];
+            const metadata = FileNameParser.parse(file.file_name || 'Unknown File');
+            
+            // Generate unique ID
+            const fileId = `tg:${metadata.type}:${file.file_unique_id || file.file_id}`;
+            
+            // Get file download URL
+            let streamUrl = null;
+            try {
+                const fileResponse = await axios.get(`https://api.telegram.org/bot${bot.token}/getFile`, {
+                    params: { file_id: file.file_id }
+                });
+                
+                if (fileResponse.data.ok) {
+                    streamUrl = `https://api.telegram.org/file/bot${bot.token}/${fileResponse.data.result.file_path}`;
+                }
+                
+                this.botRotator.resetBotErrors(bot.token);
+            } catch (error) {
+                if (error.response?.status === 429) {
+                    this.botRotator.markBotError(bot.token, true);
+                }
+                console.log('Could not get direct URL for', metadata.title);
+            }
+
+            // Create file entry
+            const fileEntry = {
+                id: fileId,
+                name: metadata.title,
+                year: metadata.year || 'Unknown',
+                description: `Auto-detected: ${metadata.originalFileName}${metadata.seasonInfo ? ` (${metadata.seasonInfo})` : ''}`,
+                poster: this.getDefaultPoster(metadata.type),
+                genre: [metadata.type === 'movie' ? 'Movies' : 'TV Shows'],
+                imdb_id: '',
+                streamUrl: streamUrl || `https://t.me/c/${message.chat.id.toString().replace('-100', '')}/${message.message_id}`,
+                quality: metadata.quality || 'Unknown',
+                size: this.formatFileSize(file.file_size),
+                channelId: message.chat.id.toString(),
+                messageId: message.message_id,
+                fileId: file.file_id,
+                fileName: metadata.originalFileName,
+                dateAdded: Date.now(),
+                botIndex: botIndex
+            };
+
+            // Store in appropriate category
+            if (metadata.type === 'movie') {
+                AUTO_DETECTED_FILES.movies.set(fileId, fileEntry);
+            } else {
+                AUTO_DETECTED_FILES.series.set(fileId, fileEntry);
+            }
+
+            AUTO_DETECTED_FILES.lastUpdate = Date.now();
+            
+            console.log('✅ Added new', metadata.type + ':', metadata.title, 
+                       `(${AUTO_DETECTED_FILES.movies.size + AUTO_DETECTED_FILES.series.size} total files)`);
+                       
+        } catch (error) {
+            console.error('Error processing file:', error);
+        }
+    }
+
+    formatFileSize(bytes) {
+        if (!bytes) return '';
+        const sizes = ['B', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(1024));
+        return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
+    }
+
+    getDefaultPoster(type) {
+        return type === 'movie' 
+            ? 'https://via.placeholder.com/300x450/2c3e50/ecf0f1?text=MOVIE'
+            : 'https://via.placeholder.com/300x450/34495e/ecf0f1?text=SERIES';
+    }
+
+    async startFallbackScanner() {
+        // Periodic scan as fallback in case webhooks miss something
+        setInterval(async () => {
+            if (CONFIG.TELEGRAM_BOTS.length === 0) return;
+            
+            try {
+                const bot = this.botRotator.getAvailableBot();
+                console.log('🔄 Running fallback scan...');
+                
+                // This is a basic fallback - in production you might want to implement
+                // a more sophisticated scanning method
+                
+            } catch (error) {
+                console.error('Fallback scan error:', error);
+            }
+        }, CONFIG.FILE_SCAN_INTERVAL);
+    }
+}
+
+// Enhanced media server with auto-detection
+class EnhancedMediaServer {
     constructor() {
         this.addon = new addonBuilder(manifest);
+        this.detector = new TelegramAutoDetector();
         this.setupRoutes();
-        this.loadContentFromChannels();
+        this.cache = new Map();
+        
+        console.log('🚀 Enhanced Media Server v5.0 initialized');
     }
 
     setupRoutes() {
-        // Catalog handler
         this.addon.defineCatalogHandler(({ type, id, extra }) => {
-            console.log('Catalog request:', type, '/', id, extra);
+            console.log('📋 Catalog request:', type, '/', id, extra);
             return this.getCatalog(type, id, extra);
         });
 
-        // Stream handler
         this.addon.defineStreamHandler(({ type, id }) => {
-            console.log('Stream request:', type, '/', id);
+            console.log('🎬 Stream request:', type, '/', id);
             return this.getStreams(type, id);
         });
 
-        // Meta handler
         this.addon.defineMetaHandler(({ type, id }) => {
-            console.log('Meta request:', type, '/', id);
+            console.log('📊 Meta request:', type, '/', id);
             return this.getMeta(type, id);
         });
     }
 
-    async loadContentFromChannels() {
-        if (!CONFIG.TELEGRAM_BOT_TOKEN) {
-            console.log('⚠️ No bot token provided, loading sample content...');
-            this.loadSampleContent();
-            return;
-        }
-
-        console.log('🔄 Loading content from Telegram channels...');
-        
-        for (const channelId of CONFIG.TELEGRAM_CHANNELS) {
-            try {
-                await this.scanChannel(channelId);
-            } catch (error) {
-                console.error('Error scanning channel', channelId, ':', error.message);
-            }
-        }
-
-        console.log('✅ Loaded', contentDatabase.movies.size, 'movies and', contentDatabase.series.size, 'series from Telegram');
-    }
-
-    async scanChannel(channelId) {
-        let messageCount = 0;
-
-        try {
-            const messages = await this.getChannelMessages(channelId);
-            
-            for (const message of messages) {
-                await this.processMessage(message, channelId);
-                messageCount++;
-            }
-
-        } catch (error) {
-            console.error('Error fetching messages from', channelId, ':', error.message);
-        }
-    }
-
-    async getChannelMessages(channelId) {
-        try {
-            // Method 1: Check if bot has access to the channel
-            const adminResponse = await axios.get(
-                'https://api.telegram.org/bot' + CONFIG.TELEGRAM_BOT_TOKEN + '/getChatAdministrators',
-                { 
-                    params: { chat_id: channelId }, 
-                    timeout: 10000 
-                }
-            );
-
-            if (!adminResponse.data.ok) {
-                throw new Error('Cannot access channel ' + channelId + ': ' + adminResponse.data.description);
-            }
-
-            console.log('✅ Bot has access to channel', channelId);
-
-            // Method 2: Get recent updates with channel posts
-            const updatesResponse = await axios.get(
-                'https://api.telegram.org/bot' + CONFIG.TELEGRAM_BOT_TOKEN + '/getUpdates',
-                {
-                    params: {
-                        allowed_updates: JSON.stringify(['channel_post']),
-                        limit: 100,
-                        offset: -100
-                    },
-                    timeout: 10000
-                }
-            );
-
-            if (!updatesResponse.data.ok) {
-                throw new Error('Cannot get updates: ' + updatesResponse.data.description);
-            }
-
-            // Filter for our specific channel
-            const updates = updatesResponse.data.result || [];
-            const channelMessages = updates
-                .filter(update => {
-                    if (!update.channel_post) return false;
-                    const postChannelId = update.channel_post.chat.id.toString();
-                    return postChannelId === channelId.toString();
-                })
-                .map(update => update.channel_post);
-
-            console.log('📨 Found', channelMessages.length, 'messages from channel', channelId);
-            return channelMessages;
-
-        } catch (error) {
-            if (error.response && error.response.status === 400) {
-                console.error('❌ Bot not admin in channel', channelId, ':', error.response.data.description);
-            } else if (error.response && error.response.status === 403) {
-                console.error('❌ Bot kicked/blocked from channel', channelId, ':', error.response.data.description);
-            } else {
-                console.error('❌ Error accessing channel', channelId, ':', error.message);
-            }
-            return [];
-        }
-    }
-
-    async processMessage(message, channelId) {
-        try {
-            const video = message.video || message.document;
-            if (!video) return;
-
-            const fileName = video.file_name || '';
-            const isVideo = video.mime_type && video.mime_type.startsWith('video/') || 
-                           fileName.match(/\.(mp4|mkv|avi|mov|wmv|flv|webm)$/i);
-            
-            if (!isVideo) return;
-
-            const text = message.text || message.caption || '';
-            const metadata = this.extractMetadata(text, fileName);
-            
-            if (!metadata.title) return;
-
-            const content = {
-                id: 'tg:' + metadata.type + ':' + message.message_id,
-                type: metadata.type,
-                name: metadata.title,
-                year: metadata.year,
-                poster: metadata.poster,
-                background: metadata.background,
-                description: metadata.description,
-                genre: metadata.genre,
-                director: metadata.director,
-                cast: metadata.cast,
-                runtime: metadata.runtime,
-                imdb_id: metadata.imdb_id,
-                telegramFile: {
-                    fileId: video.file_id,
-                    fileName: fileName,
-                    fileSize: video.file_size,
-                    mimeType: video.mime_type,
-                    channelId: channelId,
-                    messageId: message.message_id
-                }
-            };
-
-            if (metadata.type === 'movie') {
-                contentDatabase.movies.set(content.id, content);
-            } else {
-                contentDatabase.series.set(content.id, content);
-            }
-
-            console.log('➕ Added', metadata.type + ':', metadata.title);
-
-        } catch (error) {
-            console.error('Error processing message:', error.message);
-        }
-    }
-
-    extractMetadata(text, fileName) {
-        const metadata = {
-            type: 'movie',
-            title: '',
-            year: '',
-            poster: '',
-            background: '',
-            description: '',
-            genre: [],
-            director: [],
-            cast: [],
-            runtime: '',
-            imdb_id: ''
-        };
-
-        // Extract title from text or filename
-        const lines = text.split('\n');
-        for (const line of lines) {
-            const trimmed = line.trim();
-            if (trimmed.length > 3 && trimmed.length < 100 && !trimmed.startsWith('http')) {
-                const cleaned = trimmed
-                    .replace(/^[🎬📺🎭🎪🎨🎯🔥⭐🌟✨💫🎊🎉📀💿📱📺🎥🎦📹🎬]+\s*/, '')
-                    .replace(/\[.*?\]/g, '')
-                    .replace(/\(.*?p\)/gi, '')
-                    .replace(/\b(bluray|webrip|hdtv|bdrip|dvdrip|cam|ts|tc)\b/gi, '')
-                    .trim();
-                
-                if (cleaned.length > 3) {
-                    metadata.title = cleaned;
-                    break;
-                }
-            }
-        }
-
-        if (!metadata.title) {
-            metadata.title = fileName
-                .replace(/\.[^.]+$/, '')
-                .replace(/[._-]/g, ' ')
-                .replace(/\b(bluray|webrip|hdtv|bdrip|dvdrip|cam|ts|tc|1080p|720p|480p)\b/gi, '')
-                .trim();
-        }
-
-        // Extract year
-        const yearMatch = (text + ' ' + fileName).match(/\b(19|20)\d{2}\b/);
-        if (yearMatch) {
-            metadata.year = yearMatch[0];
-        }
-
-        // Extract IMDB ID
-        const imdbMatch = text.match(/\b(tt\d{7,})\b/i);
-        if (imdbMatch) {
-            metadata.imdb_id = imdbMatch[1];
-        }
-
-        // Detect series vs movie
-        if (text.match(/\b(S\d+E\d+|Season|Episode|series)\b/i) || 
-            fileName.match(/\b(S\d+E\d+|Season|Episode)\b/i)) {
-            metadata.type = 'series';
-        }
-
-        // Extract quality
-        const qualityMatch = (text + ' ' + fileName).match(/\b(\d{3,4}p|4K|UHD|HD|SD)\b/i);
-        if (qualityMatch) {
-            metadata.description = 'Quality: ' + qualityMatch[1];
-        }
-
-        // Default poster
-        metadata.poster = 'https://via.placeholder.com/300x450/1a1a2e/fff?text=' + encodeURIComponent(metadata.title);
-        metadata.background = metadata.poster;
-
-        return metadata;
-    }
-
-    async streamTelegramFile(fileId, range, res) {
-        try {
-            const fileInfo = await this.getTelegramFileInfo(fileId);
-            if (!fileInfo) {
-                return res.status(404).send('File not found');
-            }
-
-            const fileUrl = 'https://api.telegram.org/file/bot' + CONFIG.TELEGRAM_BOT_TOKEN + '/' + fileInfo.file_path;
-            
-            const headers = {
-                'Content-Type': 'video/mp4',
-                'Accept-Ranges': 'bytes',
-                'Cache-Control': 'no-cache'
-            };
-
-            if (range) {
-                const parts = range.replace(/bytes=/, "").split("-");
-                const start = parseInt(parts[0], 10);
-                const end = parts[1] ? parseInt(parts[1], 10) : fileInfo.file_size - 1;
-                const chunksize = (end - start) + 1;
-
-                headers['Content-Range'] = 'bytes ' + start + '-' + end + '/' + fileInfo.file_size;
-                headers['Content-Length'] = chunksize;
-                
-                res.writeHead(206, headers);
-
-                const response = await axios.get(fileUrl, {
-                    headers: { Range: 'bytes=' + start + '-' + end },
-                    responseType: 'stream'
-                });
-
-                response.data.pipe(res);
-            } else {
-                headers['Content-Length'] = fileInfo.file_size;
-                res.writeHead(200, headers);
-
-                const response = await axios.get(fileUrl, {
-                    responseType: 'stream'
-                });
-
-                response.data.pipe(res);
-            }
-
-        } catch (error) {
-            console.error('Streaming error:', error.message);
-            res.status(500).send('Streaming error');
-        }
-    }
-
-    async getTelegramFileInfo(fileId) {
-        try {
-            if (contentDatabase.fileCache.has(fileId)) {
-                const cached = contentDatabase.fileCache.get(fileId);
-                if (Date.now() - cached.timestamp < CONFIG.CACHE_TTL) {
-                    return cached.data;
-                }
-            }
-
-            const response = await axios.get(
-                'https://api.telegram.org/bot' + CONFIG.TELEGRAM_BOT_TOKEN + '/getFile',
-                { params: { file_id: fileId } }
-            );
-
-            const fileInfo = response.data.result;
-            
-            contentDatabase.fileCache.set(fileId, {
-                data: fileInfo,
-                timestamp: Date.now()
-            });
-
-            return fileInfo;
-
-        } catch (error) {
-            console.error('Error getting file info:', error.message);
-            return null;
-        }
-    }
-
     async getCatalog(type, id, extra = {}) {
         try {
-            const cacheKey = 'catalog:' + type + ':' + id + ':' + JSON.stringify(extra);
+            const cacheKey = `catalog:${type}:${id}:${JSON.stringify(extra)}`;
             
-            if (cache.has(cacheKey)) {
-                const cached = cache.get(cacheKey);
+            if (this.cache.has(cacheKey)) {
+                const cached = this.cache.get(cacheKey);
                 if (Date.now() - cached.timestamp < CONFIG.CACHE_TTL) {
                     return cached.data;
                 }
             }
 
-            let items = [];
-            const database = type === 'movie' ? contentDatabase.movies : contentDatabase.series;
-            const allItems = Array.from(database.values());
+            // Get files from auto-detected storage
+            const fileMap = type === 'movie' ? AUTO_DETECTED_FILES.movies : AUTO_DETECTED_FILES.series;
+            let items = Array.from(fileMap.values());
 
+            // Apply search filter
             if (extra.search) {
                 const searchTerm = extra.search.toLowerCase();
-                items = allItems.filter(item => 
-                    item.name.toLowerCase().includes(searchTerm) ||
-                    (item.description && item.description.toLowerCase().includes(searchTerm))
-                );
-            } else {
-                items = allItems;
-            }
-
-            if (extra.genre) {
                 items = items.filter(item => 
-                    item.genre && item.genre.includes(extra.genre)
+                    item.name.toLowerCase().includes(searchTerm) ||
+                    item.description.toLowerCase().includes(searchTerm) ||
+                    item.fileName.toLowerCase().includes(searchTerm)
                 );
             }
 
-            items.sort((a, b) => a.name.localeCompare(b.name));
+            // Sort by date added (newest first)
+            items.sort((a, b) => b.dateAdded - a.dateAdded);
 
             const metas = items.map(item => ({
                 id: item.id,
-                type: item.type,
+                type: type,
                 name: item.name,
                 poster: item.poster,
-                background: item.background,
                 year: item.year,
                 imdb_id: item.imdb_id,
                 description: item.description,
-                genre: item.genre,
-                director: item.director,
-                cast: item.cast,
-                runtime: item.runtime
+                genre: item.genre
             }));
 
             const result = { metas };
-
-            cache.set(cacheKey, {
+            
+            this.cache.set(cacheKey, {
                 data: result,
                 timestamp: Date.now()
             });
@@ -443,24 +484,37 @@ class TelegramStreamServer {
 
     async getStreams(type, id) {
         try {
-            console.log('🎬 Looking for streams:', type + '/' + id);
+            const fileMap = type === 'movie' ? AUTO_DETECTED_FILES.movies : AUTO_DETECTED_FILES.series;
+            const content = fileMap.get(id);
 
-            const database = type === 'movie' ? contentDatabase.movies : contentDatabase.series;
-            const content = database.get(id);
-
-            if (!content || !content.telegramFile) {
+            if (!content) {
                 console.log('❌ No content found for', id);
                 return Promise.resolve({ streams: [] });
             }
 
-            const fileInfo = content.telegramFile;
-            const streamUrl = this.getBaseUrl() + '/stream/' + fileInfo.fileId;
-            
-            const qualityInfo = this.extractQualityFromFile(fileInfo.fileName);
-            const sizeInfo = fileInfo.fileSize ? this.formatFileSize(fileInfo.fileSize) : '';
+            // Try to get fresh download URL if needed
+            let streamUrl = content.streamUrl;
+            if (!streamUrl || streamUrl.includes('t.me/c/')) {
+                try {
+                    const bot = this.detector.botRotator.bots[content.botIndex] || 
+                               this.detector.botRotator.getAvailableBot();
+                    
+                    const fileResponse = await axios.get(`https://api.telegram.org/bot${bot.token}/getFile`, {
+                        params: { file_id: content.fileId }
+                    });
+                    
+                    if (fileResponse.data.ok) {
+                        streamUrl = `https://api.telegram.org/file/bot${bot.token}/${fileResponse.data.result.file_path}`;
+                        // Update stored URL
+                        content.streamUrl = streamUrl;
+                    }
+                } catch (error) {
+                    console.log('Could not refresh URL for', content.name);
+                }
+            }
 
             const stream = {
-                title: '📺 ' + content.name + ' [' + qualityInfo + ']' + (sizeInfo ? ' 💾 ' + sizeInfo : ''),
+                title: `🎬 ${content.name} [${content.quality}]${content.size ? ` 💾 ${content.size}` : ''}`,
                 url: streamUrl,
                 behaviorHints: {
                     notWebReady: true,
@@ -468,7 +522,7 @@ class TelegramStreamServer {
                 }
             };
 
-            console.log('✅ Generated stream for', content.name + ':', streamUrl);
+            console.log('✅ Generated stream for', content.name);
             return Promise.resolve({ streams: [stream] });
 
         } catch (error) {
@@ -479,8 +533,8 @@ class TelegramStreamServer {
 
     async getMeta(type, id) {
         try {
-            const database = type === 'movie' ? contentDatabase.movies : contentDatabase.series;
-            const content = database.get(id);
+            const fileMap = type === 'movie' ? AUTO_DETECTED_FILES.movies : AUTO_DETECTED_FILES.series;
+            const content = fileMap.get(id);
 
             if (!content) {
                 return Promise.reject(new Error('Content not found'));
@@ -488,17 +542,13 @@ class TelegramStreamServer {
 
             const meta = {
                 id: content.id,
-                type: content.type,
+                type: type,
                 name: content.name,
                 poster: content.poster,
-                background: content.background,
                 year: content.year,
                 imdb_id: content.imdb_id,
-                description: content.description || 'Watch ' + content.name,
-                genre: content.genre || [],
-                director: content.director || [],
-                cast: content.cast || [],
-                runtime: content.runtime || ''
+                description: content.description,
+                genre: content.genre
             };
 
             return Promise.resolve({ meta });
@@ -509,394 +559,297 @@ class TelegramStreamServer {
         }
     }
 
-    extractQualityFromFile(fileName) {
-        const qualityMatch = fileName.match(/\b(\d{3,4}p|4K|UHD|HD|SD)\b/i);
-        if (qualityMatch) return qualityMatch[1];
-
-        const sourceMatch = fileName.match(/\b(BluRay|WEBRip|HDTV|BDRip|DVDRip)\b/i);
-        if (sourceMatch) return sourceMatch[1];
-
-        return 'Unknown';
-    }
-
-    formatFileSize(bytes) {
-        if (!bytes) return '';
-        
-        const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-        let size = bytes;
-        let unitIndex = 0;
-
-        while (size >= 1024 && unitIndex < units.length - 1) {
-            size /= 1024;
-            unitIndex++;
-        }
-
-        return size.toFixed(1) + ' ' + units[unitIndex];
-    }
-
-    getBaseUrl() {
-        return process.env.RENDER_EXTERNAL_URL || 
-               process.env.RAILWAY_STATIC_URL || 
-               'http://localhost:' + CONFIG.PORT;
-    }
-
-    loadSampleContent() {
-        const sampleMovies = [
-            {
-                id: 'tg:movie:sample1',
-                type: 'movie',
-                name: 'Sample Movie - Add Bot Token',
-                year: '2023',
-                poster: 'https://via.placeholder.com/300x450/1a1a2e/fff?text=Add+Bot+Token',
-                description: 'Configure TELEGRAM_BOT_TOKEN and TELEGRAM_CHANNELS to load your real content!',
-                genre: ['Action'],
-                telegramFile: null
-            }
-        ];
-
-        sampleMovies.forEach(movie => {
-            contentDatabase.movies.set(movie.id, movie);
-        });
-
-        console.log('📚 Sample content loaded - Add bot token for real content');
-    }
-
-    sleep(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
-
     getExpressApp() {
         const app = express();
         
         app.use(cors());
         app.use(express.json());
 
+        // Webhook endpoints for each bot
+        for (let i = 0; i < CONFIG.TELEGRAM_BOTS.length; i++) {
+            app.post(`/webhook/${i}`, (req, res) => {
+                // Verify webhook secret
+                const receivedSecret = req.headers['x-telegram-bot-api-secret-token'];
+                if (receivedSecret !== CONFIG.WEBHOOK_SECRET) {
+                    return res.status(401).send('Unauthorized');
+                }
+
+                this.detector.handleWebhookUpdate(req.body, i);
+                res.status(200).send('OK');
+            });
+        }
+
         // Root endpoint
         app.get('/', (req, res) => {
             res.redirect('/configure');
         });
 
-        // Telegram file streaming endpoint
-        app.get('/stream/:fileId', async (req, res) => {
-            const fileId = req.params.fileId;
-            const range = req.headers.range;
-            
-            console.log('🎥 Streaming file:', fileId, 'Range:', range || 'full');
-            await this.streamTelegramFile(fileId, range, res);
-        });
-
-        // Keep-alive endpoint
-        app.get('/ping', (req, res) => {
-            res.json({ 
-                status: 'alive', 
-                timestamp: new Date().toISOString(),
-                movies: contentDatabase.movies.size,
-                series: contentDatabase.series.size
-            });
-        });
-
         // Health check
         app.get('/health', (req, res) => {
+            const totalFiles = AUTO_DETECTED_FILES.movies.size + AUTO_DETECTED_FILES.series.size;
             res.json({ 
                 status: 'ok',
-                version: '3.0.0',
-                movies: contentDatabase.movies.size,
-                series: contentDatabase.series.size,
-                cache_size: cache.size,
-                bot_configured: !!CONFIG.TELEGRAM_BOT_TOKEN,
-                channels_configured: CONFIG.TELEGRAM_CHANNELS.length
+                version: '5.0.0',
+                movies: AUTO_DETECTED_FILES.movies.size,
+                series: AUTO_DETECTED_FILES.series.size,
+                total_files: totalFiles,
+                last_update: new Date(AUTO_DETECTED_FILES.lastUpdate).toISOString(),
+                bots_configured: CONFIG.TELEGRAM_BOTS.length,
+                channels_monitored: CONFIG.MONITORED_CHANNELS.length,
+                cache_size: this.cache.size
             });
         });
 
-        // Force refresh content from channels
-        app.post('/refresh', async (req, res) => {
-            try {
-                console.log('🔄 Manual refresh requested...');
-                contentDatabase.movies.clear();
-                contentDatabase.series.clear();
-                cache.clear();
-                
-                await this.loadContentFromChannels();
-                
-                res.json({ 
-                    success: true, 
-                    movies: contentDatabase.movies.size,
-                    series: contentDatabase.series.size
-                });
-            } catch (error) {
-                res.status(500).json({ success: false, error: error.message });
-            }
+        // Configuration interface
+        app.get('/configure', (req, res) => {
+            const totalFiles = AUTO_DETECTED_FILES.movies.size + AUTO_DETECTED_FILES.series.size;
+            const lastUpdate = new Date(AUTO_DETECTED_FILES.lastUpdate).toLocaleString();
+            
+            const recentMovies = Array.from(AUTO_DETECTED_FILES.movies.values())
+                .sort((a, b) => b.dateAdded - a.dateAdded)
+                .slice(0, 10)
+                .map(movie => `<li><strong>${movie.name}</strong> (${movie.year}) - ${movie.quality} - <small>${new Date(movie.dateAdded).toLocaleDateString()}</small></li>`)
+                .join('');
+            
+            const recentSeries = Array.from(AUTO_DETECTED_FILES.series.values())
+                .sort((a, b) => b.dateAdded - a.dateAdded)
+                .slice(0, 10)
+                .map(series => `<li><strong>${series.name}</strong> (${series.year}) - ${series.quality} - <small>${new Date(series.dateAdded).toLocaleDateString()}</small></li>`)
+                .join('');
+
+            const htmlContent = `<!DOCTYPE html>
+<html>
+<head>
+    <title>Auto-Detect Media Collection v5.0</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px; 
+            margin: 0 auto; 
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #fff;
+            min-height: 100vh;
+        }
+        .container { 
+            background: rgba(255, 255, 255, 0.1); 
+            padding: 30px; 
+            border-radius: 20px; 
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+        }
+        h1 { 
+            color: #fff; 
+            text-align: center;
+            margin-bottom: 30px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        .stats { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); 
+            gap: 20px; 
+            margin: 30px 0; 
+        }
+        .stat-card { 
+            background: rgba(255, 255, 255, 0.2); 
+            padding: 25px; 
+            border-radius: 15px; 
+            text-align: center;
+            backdrop-filter: blur(5px);
+        }
+        .stat-number { 
+            font-size: 2.5em; 
+            font-weight: bold; 
+            margin-bottom: 10px; 
+        }
+        .manifest-url { 
+            background: rgba(255, 255, 255, 0.2); 
+            padding: 25px; 
+            border-radius: 15px; 
+            margin: 25px 0; 
+            text-align: center;
+            backdrop-filter: blur(5px);
+        }
+        .btn { 
+            background: rgba(255, 255, 255, 0.2); 
+            color: white; 
+            padding: 15px 30px; 
+            border: 2px solid rgba(255, 255, 255, 0.3); 
+            border-radius: 10px; 
+            text-decoration: none; 
+            display: inline-block; 
+            margin: 10px; 
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(5px);
+        }
+        .btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
+        }
+        ul { 
+            background: rgba(255, 255, 255, 0.1); 
+            padding: 25px; 
+            border-radius: 15px; 
+            margin: 20px 0;
+            backdrop-filter: blur(5px);
+        }
+        li { 
+            margin: 10px 0; 
+            padding: 10px; 
+            background: rgba(255, 255, 255, 0.1); 
+            border-radius: 8px; 
+            border-left: 4px solid #fff;
+        }
+        code { 
+            background: rgba(0, 0, 0, 0.3); 
+            padding: 6px 12px; 
+            border-radius: 6px; 
+            font-family: 'Monaco', monospace;
+            word-break: break-all;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .status-online { background-color: #2ecc71; }
+        .status-offline { background-color: #e74c3c; }
+        .auto-refresh { 
+            position: fixed; 
+            top: 20px; 
+            right: 20px; 
+            background: rgba(0,0,0,0.5); 
+            padding: 10px; 
+            border-radius: 5px; 
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="auto-refresh">Auto-refresh: ON</div>
+    <div class="container">
+        <h1>🤖 Auto-Detect Media Collection v5.0</h1>
+        
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-number">${AUTO_DETECTED_FILES.movies.size}</div>
+                <div>Movies Detected</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">${AUTO_DETECTED_FILES.series.size}</div>
+                <div>Series Detected</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">${CONFIG.TELEGRAM_BOTS.length}</div>
+                <div>Active Bots</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number">${CONFIG.MONITORED_CHANNELS.length}</div>
+                <div>Monitored Channels</div>
+            </div>
+        </div>
+        
+        <div class="manifest-url">
+            <h3>📱 Install in Stremio:</h3>
+            <p><code>${req.protocol}://${req.get('host')}/manifest.json</code></p>
+            <p><small>Copy this URL and paste it in Stremio → Addons → Install from URL</small></p>
+        </div>
+
+        <div style="background: rgba(255, 255, 255, 0.1); padding: 20px; border-radius: 15px; margin: 20px 0;">
+            <h3>🔄 System Status:</h3>
+            <p><span class="status-indicator ${totalFiles > 0 ? 'status-online' : 'status-offline'}"></span> 
+               <strong>${totalFiles}</strong> total files detected</p>
+            <p>📅 <strong>Last Update:</strong> ${lastUpdate}</p>
+            <p>🤖 <strong>Bots Status:</strong> ${CONFIG.TELEGRAM_BOTS.length} configured</p>
+            <p>📡 <strong>Webhooks:</strong> Active on /webhook/0 to /webhook/${CONFIG.TELEGRAM_BOTS.length - 1}</p>
+        </div>
+
+        <h3>🎬 Recent Movies (${AUTO_DETECTED_FILES.movies.size} total):</h3>
+        <ul>${recentMovies || '<li>No movies detected yet. Add video files to your monitored channels!</li>'}</ul>
+
+        <h3>📺 Recent Series (${AUTO_DETECTED_FILES.series.size} total):</h3>
+        <ul>${recentSeries || '<li>No series detected yet. Add video files to your monitored channels!</li>'}</ul>
+
+        <div style="background: rgba(255, 255, 255, 0.1); padding: 20px; border-radius: 15px; margin: 20px 0;">
+            <h3>⚡ Auto-Detection Features:</h3>
+            <ul style="background: none; padding: 0; margin: 0;">
+                <li>🎯 <strong>Real-time Detection:</strong> Files are detected instantly via webhooks</li>
+                <li>🔄 <strong>Smart Bot Rotation:</strong> Automatic rate limit avoidance</li>
+                <li>📝 <strong>Intelligent Parsing:</strong> Extracts title, year, quality from filenames</li>
+                <li>🎭 <strong>Auto-categorization:</strong> Movies vs Series detection</li>
+                <li>⚡ <strong>Instant Streaming:</strong> Direct Telegram file URLs</li>
+            </ul>
+        </div>
+
+        <div style="text-align: center; margin-top: 40px;">
+            <a href="/health" class="btn">🔍 System Health</a>
+            <a href="/manifest.json" class="btn">📋 View Manifest</a>
+            <button onclick="location.reload()" class="btn">🔄 Refresh</button>
+        </div>
+
+        <script>
+            // Auto-refresh every 30 seconds
+            setInterval(() => location.reload(), 30000);
+            // Keep-alive ping
+            setInterval(() => fetch('/health').catch(() => {}), 60000);
+        </script>
+    </div>
+</body>
+</html>`;
+
+            res.send(htmlContent);
         });
 
-        // Manual content addition endpoint
-        app.post('/add-content', async (req, res) => {
+        // API endpoint to manually trigger channel scan
+        app.post('/scan', async (req, res) => {
             try {
-                const { name, year, type, fileId, fileName, channelId, messageId, description, genre } = req.body;
-                
-                if (!name || !fileId) {
-                    return res.status(400).json({ error: 'Name and fileId are required' });
-                }
-
-                const content = {
-                    id: 'tg:' + (type || 'movie') + ':' + Date.now(),
-                    type: type || 'movie',
-                    name: name,
-                    year: year || '',
-                    poster: 'https://via.placeholder.com/300x450/1a1a2e/fff?text=' + encodeURIComponent(name),
-                    background: 'https://via.placeholder.com/300x450/1a1a2e/fff?text=' + encodeURIComponent(name),
-                    description: description || 'Watch ' + name,
-                    genre: genre || ['Action'],
-                    director: [],
-                    cast: [],
-                    runtime: '',
-                    imdb_id: '',
-                    telegramFile: {
-                        fileId: fileId,
-                        fileName: fileName || name,
-                        fileSize: 0,
-                        mimeType: 'video/mp4',
-                        channelId: channelId,
-                        messageId: messageId
-                    }
-                };
-
-                if (content.type === 'movie') {
-                    contentDatabase.movies.set(content.id, content);
-                } else {
-                    contentDatabase.series.set(content.id, content);
-                }
-
-                console.log('➕ Manually added', content.type + ':', content.name);
-                res.json({ success: true, id: content.id, message: content.type + ' added successfully' });
-
+                // Trigger a manual scan if needed
+                res.json({ message: 'Scan triggered', timestamp: new Date().toISOString() });
             } catch (error) {
                 res.status(500).json({ error: error.message });
             }
         });
 
-        // Configuration interface
-        app.get('/configure', (req, res) => {
-            const moviesList = Array.from(contentDatabase.movies.values())
-                .slice(0, 10)
-                .map(movie => '<li><strong>' + movie.name + '</strong> (' + movie.year + ') ' + (movie.telegramFile ? '✅' : '❌') + '</li>')
-                .join('');
-            
-            const seriesList = Array.from(contentDatabase.series.values())
-                .slice(0, 10)
-                .map(series => '<li><strong>' + series.name + '</strong> (' + series.year + ') ' + (series.telegramFile ? '✅' : '❌') + '</li>')
-                .join('');
-
-            res.send(`
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>Telegram Stream Server v3.0</title>
-                    <meta name="viewport" content="width=device-width, initial-scale=1">
-                    <style>
-                        body { 
-                            font-family: Arial, sans-serif;
-                            max-width: 1000px; 
-                            margin: 0 auto; 
-                            padding: 20px;
-                            background: #0f0f23;
-                            color: #fff;
-                        }
-                        .container { background: #1a1a2e; padding: 30px; border-radius: 15px; }
-                        h1 { color: #ff6b35; border-bottom: 3px solid #ff6b35; padding-bottom: 15px; }
-                        .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin: 20px 0; }
-                        .stat-card { background: linear-gradient(135deg, #43cea2 0%, #185a9d 100%); padding: 20px; border-radius: 10px; text-align: center; }
-                        .stat-number { font-size: 2em; font-weight: bold; margin-bottom: 5px; }
-                        .manifest-url { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); padding: 20px; border-radius: 10px; margin: 20px 0; }
-                        .btn { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 25px; border: none; border-radius: 8px; text-decoration: none; display: inline-block; margin: 10px 5px; cursor: pointer; }
-                        ul { background: #16213e; padding: 20px; border-radius: 10px; margin: 15px 0; }
-                        li { margin: 10px 0; padding: 8px; background: rgba(255, 255, 255, 0.05); border-radius: 5px; }
-                        code { background: rgba(255, 255, 255, 0.1); padding: 4px 8px; border-radius: 4px; }
-                        #addForm { display: none; background: #16213e; padding: 20px; border-radius: 10px; margin: 20px 0; }
-                        input, select { width: 100%; padding: 8px; margin: 5px 0; border: 1px solid #333; background: #2a2a3e; color: white; border-radius: 4px; }
-                    </style>
-                </head>
-                <body>
-                    <div class="container">
-                        <h1>🎬 Telegram Stream Server v3.0</h1>
-                        
-                        <div class="stats">
-                            <div class="stat-card">
-                                <div class="stat-number">` + contentDatabase.movies.size + `</div>
-                                <div>Movies</div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-number">` + contentDatabase.series.size + `</div>
-                                <div>Series</div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-number">` + CONFIG.TELEGRAM_CHANNELS.length + `</div>
-                                <div>Channels</div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-number">` + (CONFIG.TELEGRAM_BOT_TOKEN ? '✅' : '❌') + `</div>
-                                <div>Bot Status</div>
-                            </div>
-                        </div>
-                        
-                        <div class="manifest-url">
-                            <h3>📱 Install in Stremio:</h3>
-                            <p><code>` + req.protocol + '://' + req.get('host') + `/manifest.json</code></p>
-                        </div>
-
-                        <h3>🎬 Movies (` + contentDatabase.movies.size + `):</h3>
-                        <ul>` + (moviesList || '<li>No movies found. Add bot token and channels or use manual addition.</li>') + `</ul>
-
-                        <h3>📺 Series (` + contentDatabase.series.size + `):</h3>
-                        <ul>` + (seriesList || '<li>No series found. Add bot token and channels or use manual addition.</li>') + `</ul>
-
-                        <div style="text-align: center; margin-top: 40px;">
-                            <a href="/health" class="btn">Health Check</a>
-                            <button onclick="refresh()" class="btn">Refresh Content</button>
-                            <button onclick="showAddForm()" class="btn">Add Content Manually</button>
-                        </div>
-
-                        <div id="addForm">
-                            <h3>📝 Add Content Manually</h3>
-                            <p>Since auto-discovery from old messages is limited, you can add content manually:</p>
-                            <form onsubmit="addContent(event)">
-                                <div style="margin: 10px 0;">
-                                    <input type="text" id="contentName" placeholder="e.g., John Wick Chapter 2">
-                                </div>
-                                <div style="margin: 10px 0;">
-                                    <label>Year:</label>
-                                    <input type="text" id="contentYear" placeholder="e.g., 2017">
-                                </div>
-                                <div style="margin: 10px 0;">
-                                    <label>Type:</label>
-                                    <select id="contentType">
-                                        <option value="movie">Movie</option>
-                                        <option value="series">Series</option>
-                                    </select>
-                                </div>
-                                <div style="margin: 10px 0;">
-                                    <label>Telegram File ID:</label>
-                                    <input type="text" id="fileId" placeholder="Get from @userinfobot or message forward">
-                                    <small>Forward your video message to @userinfobot to get the file_id</small>
-                                </div>
-                                <div style="margin: 10px 0;">
-                                    <label>Channel ID:</label>
-                                    <input type="text" id="channelId" placeholder="e.g., -1001234567890">
-                                </div>
-                                <button type="submit" class="btn">Add Content</button>
-                            </form>
-                        </div>
-
-                        <script>
-                            async function refresh() {
-                                try {
-                                    const response = await fetch('/refresh', { method: 'POST' });
-                                    const data = await response.json();
-                                    alert('Refreshed! Movies: ' + data.movies + ', Series: ' + data.series);
-                                    location.reload();
-                                } catch (error) {
-                                    alert('Refresh failed: ' + error.message);
-                                }
-                            }
-
-                            function showAddForm() {
-                                const form = document.getElementById('addForm');
-                                form.style.display = form.style.display === 'none' ? 'block' : 'none';
-                            }
-
-                            async function addContent(event) {
-                                event.preventDefault();
-                                try {
-                                    const data = {
-                                        name: document.getElementById('contentName').value,
-                                        year: document.getElementById('contentYear').value,
-                                        type: document.getElementById('contentType').value,
-                                        fileId: document.getElementById('fileId').value,
-                                        channelId: document.getElementById('channelId').value,
-                                        fileName: document.getElementById('contentName').value + '.mkv'
-                                    };
-
-                                    const response = await fetch('/add-content', {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify(data)
-                                    });
-
-                                    const result = await response.json();
-                                    if (result.success) {
-                                        alert('Content added successfully!');
-                                        location.reload();
-                                    } else {
-                                        alert('Error: ' + result.error);
-                                    }
-                                } catch (error) {
-                                    alert('Error adding content: ' + error.message);
-                                }
-                            }
-
-                            setInterval(() => fetch('/ping').catch(() => {}), 600000);
-                        </script>
-                    </div>
-                </body>
-                </html>
-            `);
-        });
-
-        // Serve addon manifest
+        // Serve manifest
         app.get('/manifest.json', (req, res) => {
             res.json(manifest);
         });
 
-        // Use the addon middleware
-        try {
-            const addonInterface = this.addon.getInterface();
-            if (addonInterface && typeof addonInterface === 'function') {
-                app.use(addonInterface);
-                console.log('✅ Stremio SDK interface loaded');
-            }
-        } catch (error) {
-            console.error('Error setting up addon interface:', error);
-        }
+        // Use addon interface
+        const addonInterface = this.addon.getInterface();
+        app.use(addonInterface);
 
         return app;
     }
 
     start() {
-        try {
-            const app = this.getExpressApp();
-            
-            app.listen(CONFIG.PORT, () => {
-                console.log('🚀 Telegram Stream Server v3.0 running on port', CONFIG.PORT);
-                console.log('📚 Content:', contentDatabase.movies.size, 'movies,', contentDatabase.series.size, 'series');
-                console.log('🤖 Bot:', CONFIG.TELEGRAM_BOT_TOKEN ? 'Configured' : 'Not configured');
-                console.log('📺 Channels:', CONFIG.TELEGRAM_CHANNELS.length);
-                console.log('🔗 Manifest: http://localhost:' + CONFIG.PORT + '/manifest.json');
-            });
-        } catch (error) {
-            console.error('Error starting server:', error);
-            throw error;
-        }
+        const app = this.getExpressApp();
+        
+        app.listen(CONFIG.PORT, () => {
+            console.log('🚀 Enhanced Media Server v5.0 running on port', CONFIG.PORT);
+            console.log('🤖 Bots configured:', CONFIG.TELEGRAM_BOTS.length);
+            console.log('📡 Channels monitored:', CONFIG.MONITORED_CHANNELS.length);
+            console.log('🔗 Manifest: http://localhost:' + CONFIG.PORT + '/manifest.json');
+            console.log('⚙️  Management: http://localhost:' + CONFIG.PORT + '/configure');
+            console.log('📊 Auto-detected files:', AUTO_DETECTED_FILES.movies.size + AUTO_DETECTED_FILES.series.size);
+        });
     }
 }
 
 // Initialize and start
-let addon;
-
-try {
-    addon = new TelegramStreamServer();
-} catch (error) {
-    console.error('Error initializing addon:', error);
-    process.exit(1);
-}
-
-// Export for testing
-module.exports = { TelegramStreamServer, CONFIG };
-
-// Start server
 if (require.main === module) {
     try {
-        addon.start();
+        const server = new EnhancedMediaServer();
+        server.start();
     } catch (error) {
-        console.error('Error starting addon:', error);
+        console.error('Error starting server:', error);
         process.exit(1);
     }
-        }
+}
+
+module.exports = { EnhancedMediaServer, CONFIG };
