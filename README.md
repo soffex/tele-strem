@@ -8,15 +8,6 @@ Turn your Telegram channels into a powerful streaming source for Stremio with mu
 
 ---
 
-## ⚡ Quick Deploy
-
-| Platform | Deploy Button | Free Tier | Best For |
-|----------|---------------|-----------|----------|
-| **Render** ⭐ | [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/YOUR_USERNAME/telegram-stremio-addon) | ✅ 750hrs/month | **Recommended** |
-| **Vercel** | [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/YOUR_USERNAME/telegram-stremio-addon) | ✅ 1M requests/month | Serverless |
-| **Railway** | [![Deploy on Railway](https://railway.app/button.svg)](https://railway.app/template/YOUR_TEMPLATE_ID) | ⚠️ $5 credit only | Not recommended |
-| **Fly.io** | Manual setup required | ✅ 3 VMs free | Advanced users |
-
 ---
 
 ## 🚀 Features
