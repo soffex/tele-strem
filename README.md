@@ -1,6 +1,6 @@
 # 🎬 Telegram Stremio Addon
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/soffex/tele-strem.git)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/soffex/tele-strem)
 
 **Stream movies and series from your Telegram channels directly to Stremio.**
 
