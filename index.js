@@ -820,9 +820,75 @@ class EnhancedMediaServer {
             res.json(manifest);
         });
 
-        // Use addon interface
-        const addonInterface = this.addon.getInterface();
-        app.use(addonInterface);
+        // Use addon interface with error handling
+        try {
+            const addonInterface = this.addon.getInterface();
+            if (addonInterface && typeof addonInterface === 'function') {
+                app.use(addonInterface);
+                console.log('✅ Stremio addon interface mounted successfully');
+            } else {
+                console.log('⚠️ Addon interface not available, using manual routes');
+                
+                // Manual route handlers as fallback
+                app.get('/catalog/:type/:id.json', async (req, res) => {
+                    try {
+                        const result = await this.getCatalog(req.params.type, req.params.id, req.query);
+                        res.json(result);
+                    } catch (error) {
+                        res.status(500).json({ error: error.message });
+                    }
+                });
+                
+                app.get('/stream/:type/:id.json', async (req, res) => {
+                    try {
+                        const result = await this.getStreams(req.params.type, req.params.id);
+                        res.json(result);
+                    } catch (error) {
+                        res.status(500).json({ error: error.message });
+                    }
+                });
+                
+                app.get('/meta/:type/:id.json', async (req, res) => {
+                    try {
+                        const result = await this.getMeta(req.params.type, req.params.id);
+                        res.json(result);
+                    } catch (error) {
+                        res.status(500).json({ error: error.message });
+                    }
+                });
+            }
+        } catch (error) {
+            console.error('❌ Error setting up addon interface:', error.message);
+            console.log('🔄 Falling back to manual routes');
+            
+            // Manual route handlers as fallback
+            app.get('/catalog/:type/:id.json', async (req, res) => {
+                try {
+                    const result = await this.getCatalog(req.params.type, req.params.id, req.query);
+                    res.json(result);
+                } catch (error) {
+                    res.status(500).json({ error: error.message });
+                }
+            });
+            
+            app.get('/stream/:type/:id.json', async (req, res) => {
+                try {
+                    const result = await this.getStreams(req.params.type, req.params.id);
+                    res.json(result);
+                } catch (error) {
+                    res.status(500).json({ error: error.message });
+                }
+            });
+            
+            app.get('/meta/:type/:id.json', async (req, res) => {
+                try {
+                    const result = await this.getMeta(req.params.type, req.params.id);
+                    res.json(result);
+                } catch (error) {
+                    res.status(500).json({ error: error.message });
+                }
+            });
+        }
 
         return app;
     }
