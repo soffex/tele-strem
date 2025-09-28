@@ -80,24 +80,6 @@ Click the "Fork" button at the top of this page.
 
 ---
 
-## 📊 Platform Comparison
-
-| Platform | Free Tier | Setup Time | Auto-Sleep | SSL | Custom Domain |
-|----------|-----------|------------|------------|-----|---------------|
-| **Render** ⭐ | 750hrs/month | 2 minutes | ✅ 15min idle | ✅ | ✅ |
-| **Vercel** | 1M requests | 1 minute | ❌ | ✅ | ✅ |
-| **Fly.io** | 3 shared VMs | 5 minutes | ❌ | ✅ | ✅ |
-| **Railway** | $5 credit only | 2 minutes | ❌ | ✅ | ✅ |
-
-### 🏆 Why Render is Recommended:
-- **Truly free** with generous limits
-- **Auto-deploy** from GitHub pushes
-- **Built-in monitoring** and logs
-- **Zero configuration** SSL
-- **Excellent uptime** and reliability
-
----
-
 ## 🤖 Multi-Bot Setup Benefits
 
 ### Performance Comparison:
