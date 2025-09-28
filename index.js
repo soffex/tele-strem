@@ -4,31 +4,6 @@ const cors = require('cors');
 const axios = require('axios');
 const crypto = require('crypto');
 
-// Addon manifest
-const manifest = {
-    id: CONFIG.ADDON_ID,
-    version: CONFIG.ADDON_VERSION,
-    name: CONFIG.ADDON_NAME,
-    description: CONFIG.ADDON_DESCRIPTION,
-    resources: ['catalog', 'stream', 'meta'],
-    types: ['movie', 'series'],
-    idPrefixes: ['tg'],
-    catalogs: [
-        {
-            type: 'movie',
-            id: 'telegram-movies',
-            name: 'Telegram Movies',
-            extra: [{ name: 'search', isRequired: false }]
-        },
-        {
-            type: 'series',
-            id: 'telegram-series',
-            name: 'Telegram Series', 
-            extra: [{ name: 'search', isRequired: false }]
-        }
-    ]
-};
-
 // Enhanced configuration with multiple setup options
 const CONFIG = {
     // Bot tokens - supports multiple configuration methods
@@ -140,6 +115,31 @@ const CONFIG = {
     ADDON_VERSION: process.env.ADDON_VERSION || '5.0.0',
     ADDON_NAME: process.env.ADDON_NAME || 'Auto-Detect Media Collection',
     ADDON_DESCRIPTION: process.env.ADDON_DESCRIPTION || 'Automatically detect and stream media from Telegram channels'
+};
+
+// Addon manifest - defined after CONFIG
+const manifest = {
+    id: CONFIG.ADDON_ID,
+    version: CONFIG.ADDON_VERSION,
+    name: CONFIG.ADDON_NAME,
+    description: CONFIG.ADDON_DESCRIPTION,
+    resources: ['catalog', 'stream', 'meta'],
+    types: ['movie', 'series'],
+    idPrefixes: ['tg'],
+    catalogs: [
+        {
+            type: 'movie',
+            id: 'telegram-movies',
+            name: 'Telegram Movies',
+            extra: [{ name: 'search', isRequired: false }]
+        },
+        {
+            type: 'series',
+            id: 'telegram-series',
+            name: 'Telegram Series', 
+            extra: [{ name: 'search', isRequired: false }]
+        }
+    ]
 };
 
 // Global file storage - automatically populated
