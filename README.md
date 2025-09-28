@@ -1,302 +1,321 @@
-# 🎬 Telegram Stremio Addon
+# Hybrid Pyrogram Stremio Addon
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/soffex/tele-strem)
+A hybrid architecture Stremio addon that streams personal media files from Telegram channels using Pyrogram (MTProto) with intelligent caching and rate limit management.
 
-**Stream movies and series from your Telegram channels directly to Stremio.**
+## Features
 
-Turn your Telegram channels into a powerful streaming source for Stremio with multi-bot support, smart rate limiting, and automatic quality detection.
+- **Direct Telegram Streaming**: Bypasses 20MB Bot API limits using MTProto
+- **Smart Caching**: Automatically caches frequently accessed files
+- **Rate Limit Management**: Handles concurrent streams without hitting Telegram limits
+- **SQLite Database**: Persistent storage of file metadata
+- **Background Cleanup**: Automatic cache management
+- **Docker Ready**: Easy deployment with docker-compose
 
----
+## Prerequisites
 
----
+1. **VPS with Docker and Docker Compose installed**
+2. **Telegram API credentials** from https://my.telegram.org
+3. **Phone number** for Telegram authentication
+4. **Channel IDs** of your personal media channels
 
-## 🚀 Features
+## Quick Start
 
-- 🤖 **Multi-Bot Support** - Use up to 5 bots to avoid rate limits
-- 📺 **Stremio Integration** - Seamless streaming to Stremio
-- 🔍 **Smart Search** - Automatically finds content by IMDB ID
-- 💾 **Quality Detection** - Auto-detects video quality (720p, 1080p, 4K)
-- ⚡ **Lightning Fast** - Up to 5x faster with multiple bots
-- 🔄 **Auto-Failover** - Switches bots automatically on rate limits
-- 📊 **Real-time Monitoring** - Track bot usage and performance
-- 🌐 **Self-Hosted** - Your own private streaming service
-- 🐳 **Docker Ready** - Easy containerized deployment
-- 🔒 **Private & Secure** - No third-party dependencies
+### 1. Get Telegram API Credentials
 
----
+1. Go to https://my.telegram.org
+2. Login with your phone number
+3. Go to "API Development Tools"
+4. Create a new application:
+   - App title: "Personal Media Addon"
+   - Short name: "media_addon"
+   - Platform: "Desktop"
+5. Save your `api_id` and `api_hash`
 
-## 🛠️ Quick Setup
+### 2. Find Your Channel IDs
 
-### 1. 🍴 Fork this Repository
-Click the "Fork" button at the top of this page.
+For private channels, you need the numerical ID:
 
-### 2. 🤖 Create Telegram Bots
-1. Go to [@BotFather](https://t.me/botfather) on Telegram
-2. Send `/newbot` and follow instructions
-3. **Create 3-5 bots** for better performance
-4. Save all bot tokens
+1. Add @userinfobot to your channel
+2. Send any message in the channel
+3. The bot will reply with the channel ID (like `-1001234567890`)
+4. Remove the bot after getting the ID
 
-### 3. 📺 Add Bots to Channels
-1. Add **ALL bots** to your movie/series channels as **admins**
-2. Give them permission to read messages
-3. Get your channel IDs (use [@userinfobot](https://t.me/userinfobot))
-
-### 4. 🚀 Deploy
-1. Choose a platform above (Render recommended)
-2. Click the deploy button
-3. Set environment variables (see below)
-4. Deploy!
-
-### 5. 📱 Install in Stremio
-1. Copy your addon URL: `https://your-app.onrender.com/manifest.json`
-2. Open Stremio → Addons → Install from URL
-3. Paste URL and install
-4. Start streaming! 🎉
-
----
-
-## 🎯 Environment Variables
-
-| Variable | Description | Required | Example |
-|----------|-------------|----------|---------|
-| `TELEGRAM_BOT_TOKENS` | Comma-separated bot tokens | ✅ | `token1,token2,token3` |
-| `TELEGRAM_CHANNELS` | Channel IDs or usernames | ✅ | `@movies,-1001234567890` |
-| `RATE_LIMIT_DELAY` | Delay between requests (ms) | ❌ | `1000` |
-| `MAX_REQUESTS_PER_BOT_PER_MINUTE` | Request limit per bot | ❌ | `20` |
-| `RETRY_ATTEMPTS` | Number of retry attempts | ❌ | `3` |
-| `CACHE_TTL` | Cache duration (ms) | ❌ | `3600000` |
-
-### 🔑 Setting Up Environment Variables
-
-**For Render:**
-1. Go to your service dashboard
-2. Navigate to "Environment" tab
-3. Add the variables above
-
-**For Vercel:**
-1. Go to project settings
-2. Navigate to "Environment Variables"
-3. Add each variable
-
----
-
-## 📊 Platform Comparison
-
-| Platform | Free Tier | Setup Time | Auto-Sleep | SSL | Custom Domain |
-|----------|-----------|------------|------------|-----|---------------|
-| **Render** ⭐ | 750hrs/month | 2 minutes | ✅ 15min idle | ✅ | ✅ |
-| **Vercel** | 1M requests | 1 minute | ❌ | ✅ | ✅ |
-| **Fly.io** | 3 shared VMs | 5 minutes | ❌ | ✅ | ✅ |
-| **Railway** | $5 credit only | 2 minutes | ❌ | ✅ | ✅ |
-
-### 🏆 Why Render is Recommended:
-- **Truly free** with generous limits
-- **Auto-deploy** from GitHub pushes
-- **Built-in monitoring** and logs
-- **Zero configuration** SSL
-- **Excellent uptime** and reliability
-
----
-
-## 🤖 Multi-Bot Setup Benefits
-
-### Performance Comparison:
-| Bots | Search Time | Reliability | Rate Limit Risk |
-|------|-------------|-------------|-----------------|
-| 1 bot | ~60 seconds | 70% | High |
-| 3 bots | ~20 seconds | 90% | Low |
-| 5 bots | ~12 seconds | 99% | Very Low |
-
-### Why Multiple Bots?
-- **5x Faster Searches** - Parallel processing
-- **Better Reliability** - Automatic failover
-- **No Rate Limiting** - Smart load balancing
-- **24/7 Uptime** - Always available
-
----
-
-## 📺 Channel Content Format
-
-For best results, format your Telegram posts like this:
-
-```
-🎬 The Dark Knight (2008)
-📊 IMDB: tt0468569
-🎥 Quality: 1080p BluRay
-💾 Size: 2.5GB
-⭐ Rating: 9.0/10
-
-[Upload video file or paste streaming link]
-```
-
-The addon will automatically:
-- ✅ Extract IMDB IDs
-- ✅ Detect video quality
-- ✅ Parse file sizes
-- ✅ Generate proper titles
-- ✅ Create streaming links
-
----
-
-## 🔧 Local Development
+### 3. Clone and Setup
 
 ```bash
-# Clone your forked repository
-git clone https://github.com/soffex/tele-strem.git
-cd telegram-stremio-addon
+# SSH into your VPS
+ssh user@your-vps-ip
 
-# Install dependencies
-npm install
+# Create project directory
+mkdir ~/stremio-telegram-addon
+cd ~/stremio-telegram-addon
 
-# Copy environment file
+# Clone your repository or copy files manually
+git clone https://github.com/yourusername/your-repo.git .
+
+# Create environment file
 cp .env.example .env
-
-# Edit with your bot tokens and channels
 nano .env
-
-# Start development server
-npm run dev
-
-# Open browser
-open http://localhost:3000/configure
 ```
 
----
+### 4. Configure Environment
 
-## 🐳 Docker Deployment
+Edit `.env` file with your credentials:
 
-### Quick Start:
+```env
+API_ID=12345678
+API_HASH=your_api_hash_here
+PHONE_NUMBER=+1234567890
+MONITORED_CHANNELS=-1001234567890,-1001111222333
+```
+
+### 5. Deploy
+
 ```bash
-# Clone repository
-git clone https://github.com/soffex/tele-strem.git
-cd tele-strem
+# Create data directories
+mkdir -p data/sessions data/cache data/database
 
-# Create .env file with your tokens
-cp .env.example .env
-nano .env
-
-# Start with Docker Compose
+# Build and start the container
 docker-compose up -d
 
-# View logs
-docker-compose logs -f
+# Check logs for first-time authentication
+docker-compose logs -f stremio-addon
 ```
 
-### Docker Hub:
+## First-Time Authentication
+
+When you first run the container, Pyrogram will ask for authentication:
+
 ```bash
-docker run -d \
-  -p 3000:3000 \
-  -e TELEGRAM_BOT_TOKENS="token1,token2" \
-  -e TELEGRAM_CHANNELS="@channel1,@channel2" \
-  --restart unless-stopped \
-  --name telegram-stremio \
-  your-username/telegram-stremio-addon:latest
+# Watch the logs
+docker-compose logs -f stremio-addon
+
+# If you see authentication prompts, run interactively:
+docker-compose down
+docker-compose run --rm stremio-addon python main.py
+
+# Follow the prompts:
+# 1. Confirm your phone number
+# 2. Enter the verification code sent to your phone
+# 3. Enter 2FA password if you have one
+# 4. Once authenticated, press Ctrl+C and restart normally
+
+docker-compose up -d
 ```
 
----
+## Verification
 
-## 📊 Monitoring & Health Checks
+1. **Check service health:**
+   ```bash
+   curl http://your-vps-ip:8080/health
+   ```
 
-### Health Endpoint:
-Visit `https://your-app.onrender.com/health` to see:
+2. **Check manifest:**
+   ```bash
+   curl http://your-vps-ip:8080/manifest.json
+   ```
 
-```json
-{
-  "status": "ok",
-  "channels": 3,
-  "cache_size": 127,
-  "bots": 5,
-  "bot_stats": {
-    "bot_1": {
-      "requests_this_minute": 15,
-      "limit": 20,
-      "reset_time": "2024-01-15T10:45:00Z"
-    }
-  }
-}
+3. **View logs:**
+   ```bash
+   docker-compose logs stremio-addon
+   ```
+
+## Configure Stremio
+
+1. Open Stremio
+2. Go to Addons section
+3. Click "Install from URL"
+4. Enter: `http://your-vps-ip:8080/manifest.json`
+5. Click Install
+
+## Configuration Options
+
+### Performance Settings
+
+Adjust these in your `.env` file based on your VPS specs:
+
+```env
+# Chunk size for streaming (default: 1MB)
+CHUNK_SIZE=1048576
+
+# Maximum cache size (default: 5GB)
+MAX_CACHE_SIZE=5368709120
+
+# Cache cleanup interval (default: 1 hour)
+CACHE_CLEANUP_INTERVAL=3600
+
+# Maximum concurrent downloads (default: 3)
+MAX_CONCURRENT_DOWNLOADS=3
+
+# Rate limit delay (default: 1.0 seconds)
+RATE_LIMIT_DELAY=1.0
 ```
 
-### Configuration Page:
-Visit `https://your-app.onrender.com/configure` for:
-- ✅ Bot status and usage statistics
-- ✅ Channel configuration verification
-- ✅ Performance metrics
-- ✅ Setup validation
+### Resource Limits
 
----
+Modify `docker-compose.yml` for your VPS:
 
-## 🆘 Troubleshooting
+```yaml
+deploy:
+  resources:
+    limits:
+      memory: 4G      # Adjust based on your RAM
+      cpus: '2.0'     # Adjust based on your CPU
+    reservations:
+      memory: 1G
+      cpus: '0.5'
+```
 
-### Common Issues:
+## Directory Structure
 
-**"No streams found"**
-- ✅ Verify IMDB IDs are in channel posts
-- ✅ Check bot tokens are correct
-- ✅ Ensure bots are admins in channels
+```
+~/stremio-telegram-addon/
+├── main.py                 # Main application
+├── requirements.txt        # Python dependencies
+├── Dockerfile             # Container definition
+├── docker-compose.yml     # Container orchestration
+├── .env                   # Environment variables
+├── .env.example          # Environment template
+├── .dockerignore         # Docker build exclusions
+└── data/
+    ├── sessions/         # Telegram session files
+    ├── cache/           # File cache
+    └── database/        # SQLite database
+```
 
-**"Rate limit exceeded"**
-- ✅ Add more bot tokens
-- ✅ Increase `RATE_LIMIT_DELAY`
-- ✅ Check `/health` endpoint for bot usage
+## Troubleshooting
 
-**"Bot permission denied"**
-- ✅ Make sure bots are channel admins
-- ✅ Enable "Read All Messages" for bots
-- ✅ Test with [@userinfobot](https://t.me/userinfobot)
+### Authentication Issues
 
-### Getting Help:
-1. 📊 Check `/health` endpoint
-2. 📋 Review application logs  
-3. 🔍 Test individual bot tokens
-4. 🐛 [Create an issue](https://github.com/YOUR_USERNAME/telegram-stremio-addon/issues)
+```bash
+# Check logs for authentication errors
+docker-compose logs stremio-addon
 
----
+# Clear session and re-authenticate
+sudo rm -rf data/sessions/*
+docker-compose restart stremio-addon
+```
 
-## 🤝 Contributing
+### Memory Issues
 
-Contributions are welcome! Please:
-1. 🍴 Fork the repository
-2. 🌿 Create a feature branch
-3. 💡 Make your improvements
-4. 🧪 Test thoroughly
-5. 📝 Submit a pull request
+```bash
+# Check container memory usage
+docker stats stremio-addon
 
----
+# Adjust memory limits in docker-compose.yml
+```
 
-## ⭐ Show Your Support
+### Network Issues
 
-If this project helps you stream your content, please:
-- ⭐ **Star this repository**
-- 🍴 **Share with friends**
-- 🐛 **Report issues**
-- 💡 **Suggest features**
-- 🤝 **Contribute code**
+```bash
+# Check if port is accessible
+curl http://localhost:8080/health
 
----
+# Check firewall (Ubuntu/Debian)
+sudo ufw allow 8080
 
-## 📄 License
+# Check if container is running
+docker-compose ps
+```
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+### Cache Issues
 
----
+```bash
+# Check cache size
+du -sh data/cache/
 
-## ⚠️ Legal Disclaimer
+# Clear cache manually
+sudo rm -rf data/cache/*
+docker-compose restart stremio-addon
+```
 
-This addon is designed for **personal use only**. Users are responsible for:
+## Monitoring
 
-- ✅ Complying with Telegram's Terms of Service
-- ✅ Ensuring they have rights to stream their content
-- ✅ Following local laws and regulations
-- ✅ Respecting copyright and intellectual property
+### View Logs
 
-**Use responsibly and enjoy your private streaming service!** 🎬✨
+```bash
+# Recent logs
+docker-compose logs --tail=100 stremio-addon
 
----
+# Live logs
+docker-compose logs -f stremio-addon
+```
 
-<div align="center">
+### System Status
 
-**Made with ❤️ for the Stremio community**
+```bash
+# Health check
+curl http://your-vps-ip:8080/health
 
-[⭐ Star this repo](https://github.com/YOUR_USERNAME/telegram-stremio-addon) • [🐛 Report Bug](https://github.com/YOUR_USERNAME/telegram-stremio-addon/issues) • [💡 Request Feature](https://github.com/YOUR_USERNAME/telegram-stremio-addon/issues)
+# Container stats
+docker stats stremio-addon
+```
 
-</div>
+## Maintenance
+
+### Updates
+
+```bash
+# Pull latest code
+git pull
+
+# Rebuild and restart
+docker-compose build --no-cache
+docker-compose up -d
+```
+
+### Backup
+
+```bash
+# Backup important data
+tar -czf telegram-addon-backup.tar.gz data/
+```
+
+### Database Maintenance
+
+The SQLite database automatically manages itself, but you can:
+
+```bash
+# View database size
+ls -lh data/database/media.db
+
+# Access database (if needed)
+docker-compose exec stremio-addon sqlite3 /app/data/media.db
+```
+
+## Performance Tips
+
+1. **SSD Storage**: Use SSD for better I/O performance
+2. **Memory**: Allocate at least 2GB RAM for the container
+3. **Network**: Ensure good bandwidth between VPS and Telegram servers
+4. **Cache Size**: Adjust based on your available disk space
+5. **Concurrent Downloads**: Start with 3, increase if your VPS can handle it
+
+## Security
+
+1. **Firewall**: Only open port 8080 if you need external access
+2. **HTTPS**: Use a reverse proxy (nginx) with SSL for production
+3. **Access Control**: Consider adding authentication to the addon
+4. **Monitoring**: Set up log monitoring and alerts
+
+## Architecture
+
+The addon uses a hybrid architecture:
+
+- **Single Pyrogram client** for metadata operations and file detection
+- **Smart caching system** for frequently accessed files
+- **Rate limiting** to respect Telegram's API limits
+- **SQLite database** for persistent storage
+- **Background tasks** for cache cleanup
+
+This design provides the best balance of performance, reliability, and resource usage while staying within Telegram's rate limits.
+
+## Support
+
+If you encounter issues:
+
+1. Check the logs first: `docker-compose logs stremio-addon`
+2. Verify your API credentials and channel IDs
+3. Ensure your VPS has sufficient resources
+4. Check network connectivity to Telegram servers
+5. Review the troubleshooting section above
