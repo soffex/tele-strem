@@ -6,24 +6,24 @@ const crypto = require('crypto');
 
 // Addon manifest
 const manifest = {
-    id: 'org.telegram.autodetect',
-    version: '5.0.0',
-    name: 'Auto-Detect Media Collection',
-    description: 'Automatically detect and stream media from Telegram channels',
+    id: CONFIG.ADDON_ID,
+    version: CONFIG.ADDON_VERSION,
+    name: CONFIG.ADDON_NAME,
+    description: CONFIG.ADDON_DESCRIPTION,
     resources: ['catalog', 'stream', 'meta'],
     types: ['movie', 'series'],
     idPrefixes: ['tg'],
     catalogs: [
         {
             type: 'movie',
-            id: 'auto-movies',
-            name: 'Auto Movies',
+            id: 'telegram-movies',
+            name: 'Telegram Movies',
             extra: [{ name: 'search', isRequired: false }]
         },
         {
             type: 'series',
-            id: 'auto-series',
-            name: 'Auto Series', 
+            id: 'telegram-series',
+            name: 'Telegram Series', 
             extra: [{ name: 'search', isRequired: false }]
         }
     ]
@@ -328,11 +328,11 @@ class TelegramAutoDetector {
                 return;
             }
             
-            // For files larger than 20MB (most videos), use direct Telegram streaming URL
+            // For large files (>20MB), we'll use alternative streaming methods
             let streamUrl = null;
-            let isDirectUrl = false;
+            let streamType = 'telegram_link'; // Default to telegram link
             
-            // Try to get direct URL only for smaller files
+            // Only try getFile for smaller files
             if (file.file_size && file.file_size < 20971520) { // 20MB limit
                 try {
                     const fileResponse = await axios.get(`https://api.telegram.org/bot${bot.token}/getFile`, {
@@ -342,7 +342,8 @@ class TelegramAutoDetector {
                     
                     if (fileResponse.data.ok) {
                         streamUrl = `https://api.telegram.org/file/bot${bot.token}/${fileResponse.data.result.file_path}`;
-                        isDirectUrl = true;
+                        streamType = 'direct_url';
+                        console.log('✅ Got direct URL for', metadata.title);
                     }
                     
                     this.botRotator.resetBotErrors(bot.token);
@@ -350,28 +351,42 @@ class TelegramAutoDetector {
                     if (error.response?.status === 429) {
                         this.botRotator.markBotError(bot.token, true);
                     }
-                    console.log('⚠️ Could not get direct URL for', metadata.title, '- using streaming method');
+                    console.log('⚠️ Small file direct URL failed for', metadata.title);
                 }
+            } else {
+                console.log('📦 Large file detected:', metadata.title, `(${this.formatFileSize(file.file_size)})`);
             }
             
-            // For larger files or if direct URL failed, use streaming approach
+            // For large files or if direct URL failed, use different approaches
             if (!streamUrl) {
-                // Use a special streaming endpoint that we'll create
-                streamUrl = `https://${process.env.RENDER_EXTERNAL_HOSTNAME || 'localhost'}/stream-file/${bot.index}/${file.file_id}`;
-                console.log('🎥 Using streaming URL for', metadata.title);
+                // Try multiple URL formats for better compatibility
+                const channelUsername = await this.getChannelUsername(message.chat.id, bot.token);
+                
+                if (channelUsername) {
+                    // Public channel link (best compatibility)
+                    streamUrl = `https://t.me/${channelUsername}/${message.message_id}`;
+                    streamType = 'public_link';
+                } else {
+                    // Private channel link (requires Telegram app)
+                    const cleanChannelId = message.chat.id.toString().replace('-100', '');
+                    streamUrl = `https://t.me/c/${cleanChannelId}/${message.message_id}`;
+                    streamType = 'private_link';
+                }
+                
+                console.log('🔗 Using', streamType, 'for', metadata.title);
             }
 
-            // Create file entry
+            // Create file entry with better metadata
             const fileEntry = {
                 id: fileId,
                 name: metadata.title,
-                year: metadata.year || 'Unknown',
-                description: `${metadata.originalFileName}${metadata.seasonInfo ? ` (${metadata.seasonInfo})` : ''}`,
+                year: metadata.year || new Date().getFullYear().toString(),
+                description: `${metadata.seasonInfo ? `${metadata.seasonInfo} - ` : ''}${metadata.originalFileName}`,
                 poster: this.getDefaultPoster(metadata.type),
-                genre: [metadata.type === 'movie' ? 'Movies' : 'TV Shows'],
-                imdb_id: '',
+                genre: [metadata.type === 'movie' ? 'Action' : 'TV Shows'], // Generic genres for now
+                imdb_id: '', // We could implement TMDB lookup later
                 streamUrl: streamUrl,
-                quality: metadata.quality || 'Unknown',
+                quality: metadata.quality || this.guessQualityFromSize(file.file_size),
                 size: this.formatFileSize(file.file_size),
                 channelId: message.chat.id.toString(),
                 messageId: message.message_id,
@@ -379,7 +394,8 @@ class TelegramAutoDetector {
                 fileName: metadata.originalFileName,
                 dateAdded: Date.now(),
                 botIndex: botIndex,
-                isDirectUrl: isDirectUrl
+                streamType: streamType,
+                runtime: this.guessRuntime(metadata.type) // Add runtime for Stremio
             };
 
             // Store in appropriate category
@@ -397,6 +413,38 @@ class TelegramAutoDetector {
         } catch (error) {
             console.error('Error processing file:', error);
         }
+    }
+
+    async getChannelUsername(chatId, botToken) {
+        try {
+            const response = await axios.get(`https://api.telegram.org/bot${botToken}/getChat`, {
+                params: { chat_id: chatId },
+                timeout: 5000
+            });
+            
+            if (response.data.ok && response.data.result.username) {
+                return response.data.result.username;
+            }
+        } catch (error) {
+            // Ignore error, channel is probably private
+        }
+        return null;
+    }
+
+    guessQualityFromSize(fileSize) {
+        if (!fileSize) return 'Unknown';
+        
+        const sizeGB = fileSize / (1024 * 1024 * 1024);
+        
+        if (sizeGB > 3) return '4K/2160p';
+        if (sizeGB > 1.5) return '1080p';
+        if (sizeGB > 0.8) return '720p';
+        return '480p';
+    }
+
+    guessRuntime(type) {
+        // Add some runtime for better Stremio display
+        return type === 'movie' ? '120 min' : '45 min';
     }
 
     formatFileSize(bytes) {
@@ -611,78 +659,7 @@ class EnhancedMediaServer {
             });
         }
 
-        // File streaming endpoint for large files
-        app.get('/stream-file/:botIndex/:fileId', async (req, res) => {
-            try {
-                const { botIndex, fileId } = req.params;
-                const bot = this.detector.botRotator.bots[parseInt(botIndex)];
-                
-                if (!bot) {
-                    return res.status(404).send('Bot not found');
-                }
 
-                // Get file info from Telegram
-                const fileInfoResponse = await axios.get(`https://api.telegram.org/bot${bot.token}/getFile`, {
-                    params: { file_id: fileId },
-                    timeout: 10000
-                });
-
-                if (!fileInfoResponse.data.ok) {
-                    return res.status(404).send('File not found');
-                }
-
-                const filePath = fileInfoResponse.data.result.file_path;
-                const telegramFileUrl = `https://api.telegram.org/file/bot${bot.token}/${filePath}`;
-
-                // Proxy the file stream
-                const fileResponse = await axios({
-                    method: 'GET',
-                    url: telegramFileUrl,
-                    responseType: 'stream',
-                    timeout: 0 // No timeout for streaming
-                });
-
-                // Set appropriate headers
-                res.set({
-                    'Content-Type': fileResponse.headers['content-type'] || 'video/mp4',
-                    'Content-Length': fileResponse.headers['content-length'],
-                    'Accept-Ranges': 'bytes',
-                    'Cache-Control': 'public, max-age=3600'
-                });
-
-                // Handle range requests for video seeking
-                if (req.headers.range && fileResponse.headers['content-length']) {
-                    const total = parseInt(fileResponse.headers['content-length']);
-                    const range = req.headers.range;
-                    const parts = range.replace(/bytes=/, "").split("-");
-                    const start = parseInt(parts[0], 10);
-                    const end = parts[1] ? parseInt(parts[1], 10) : total - 1;
-                    const chunksize = (end - start) + 1;
-                    
-                    res.status(206);
-                    res.set({
-                        'Content-Range': `bytes ${start}-${end}/${total}`,
-                        'Content-Length': chunksize
-                    });
-                }
-
-                // Pipe the response
-                fileResponse.data.pipe(res);
-
-                fileResponse.data.on('error', (error) => {
-                    console.error('Stream error:', error);
-                    if (!res.headersSent) {
-                        res.status(500).send('Stream error');
-                    }
-                });
-
-            } catch (error) {
-                console.error('File streaming error:', error);
-                if (!res.headersSent) {
-                    res.status(500).send('File streaming failed');
-                }
-            }
-        });
 
         // Root endpoint
         app.get('/', (req, res) => {
