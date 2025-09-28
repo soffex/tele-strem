@@ -38,6 +38,10 @@ services:
       
     restart: unless-stopped
     
+    # Keep container alive and prevent idle shutdown
+    tty: true
+    stdin_open: true
+    
     # Health check
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
