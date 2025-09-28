@@ -409,6 +409,38 @@ class MediaServer {
         }
     }
 
+    setupFallbackRoutes(app) {
+        // Manual Stremio protocol routes
+        app.get('/catalog/:type/:id.json', async (req, res) => {
+            try {
+                const result = await this.getCatalog(req.params.type, req.params.id, req.query);
+                res.json(result);
+            } catch (error) {
+                res.status(500).json({ error: error.message });
+            }
+        });
+        
+        app.get('/stream/:type/:id.json', async (req, res) => {
+            try {
+                const result = await this.getStreams(req.params.type, req.params.id);
+                res.json(result);
+            } catch (error) {
+                res.status(500).json({ error: error.message });
+            }
+        });
+        
+        app.get('/meta/:type/:id.json', async (req, res) => {
+            try {
+                const result = await this.getMeta(req.params.type, req.params.id);
+                res.json(result);
+            } catch (error) {
+                res.status(500).json({ error: error.message });
+            }
+        });
+        
+        console.log('✅ Fallback routes configured');
+    }
+
     start() {
         const app = express();
         app.use(cors());
@@ -512,13 +544,20 @@ class MediaServer {
             res.json(manifest);
         });
 
-        // Addon interface
+        // Addon interface with fallback
         try {
             const addonInterface = this.addon.getInterface();
-            app.use(addonInterface);
-            console.log('✅ Stremio interface mounted');
+            if (addonInterface && typeof addonInterface === 'function') {
+                app.use(addonInterface);
+                console.log('✅ Stremio interface mounted');
+            } else {
+                console.log('⚠️ Using fallback routes');
+                this.setupFallbackRoutes(app);
+            }
         } catch (error) {
             console.error('❌ Addon interface failed:', error);
+            console.log('🔄 Setting up fallback routes');
+            this.setupFallbackRoutes(app);
         }
 
         app.listen(CONFIG.PORT, () => {
