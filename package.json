@@ -1,12 +1,11 @@
 {
-  "name": "telegram-streams-stremio-addon",
-  "version": "1.0.0",
-  "description": "Stremio addon for streaming from Telegram channels",
+  "name": "tele-strem-fixed",
+  "version": "1.1.0",
+  "description": "Fixed Telegram-based Stremio addon that handles large files properly",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js",
-    "test": "node test.js"
+    "dev": "nodemon index.js"
   },
   "keywords": [
     "stremio",
@@ -14,20 +13,21 @@
     "telegram",
     "streaming",
     "movies",
-    "series"
+    "large-files"
   ],
-  "author": "Your Name",
+  "author": "Tele-Strem Contributors",
   "license": "MIT",
   "dependencies": {
     "stremio-addon-sdk": "^1.6.6",
-    "axios": "^1.6.0",
-    "express": "^4.18.0",
-    "cors": "^2.8.5"
+    "telegram": "^2.20.7",
+    "node-cache": "^5.1.2",
+    "input": "^1.0.1",
+    "express": "^4.18.2"
   },
   "devDependencies": {
-    "nodemon": "^3.0.0"
+    "nodemon": "^3.0.1"
   },
   "engines": {
-    "node": ">=14.0.0"
+    "node": ">=16.0.0"
   }
 }
