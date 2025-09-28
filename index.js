@@ -210,30 +210,39 @@ class FileNameParser {
         const year = yearMatch ? yearMatch[0] : '';
         
         // Extract quality
-        const qualityMatch = cleaned.match(/\b(480p|720p|1080p|1440p|2160p|4K|BluRay|WEBRip|HDRip|DVDRip|CAMRip)\b/i);
+        const qualityMatch = cleaned.match(/\b(480p|720p|1080p|1440p|2160p|4K|BluRay|WEBRip|HDRip|DVDRip|CAMRip|WEB-DL|BDRip)\b/i);
         const quality = qualityMatch ? qualityMatch[0] : '';
         
-        // Clean title (remove common patterns)
-        let title = cleaned
-            .replace(/\b(19|20)\d{2}\b/g, '') // Remove year
-            .replace(/\b(480p|720p|1080p|1440p|2160p|4K|BluRay|WEBRip|HDRip|DVDRip|CAMRip)\b/gi, '') // Remove quality
-            .replace(/\b(x264|x265|H264|H265|HEVC|AAC|AC3|DTS|5\.1|7\.1)\b/gi, '') // Remove codecs
-            .replace(/[._-]/g, ' ') // Replace separators with spaces
-            .replace(/\s+/g, ' ') // Multiple spaces to single
-            .trim();
-        
-        // Detect if series (common patterns)
-        const isSeriesPattern = /\b(S\d{1,2}|Season|Episode|EP?\d{1,2})\b/i;
+        // Better series detection patterns
+        const isSeriesPattern = /\b(S\d{1,2}E\d{1,2}|S\d{1,2}|Season|Episode|EP?\d{1,2}|E\d{1,2})\b/i;
         const isSeries = isSeriesPattern.test(filename);
         
         // Extract season/episode info for series
         let seasonInfo = '';
         if (isSeries) {
+            const seasonEpisodeMatch = filename.match(/S(\d{1,2})E(\d{1,2})/i);
             const seasonMatch = filename.match(/S(\d{1,2})/i);
             const episodeMatch = filename.match(/E(\d{1,2})/i);
-            if (seasonMatch) seasonInfo += `S${seasonMatch[1]}`;
-            if (episodeMatch) seasonInfo += `E${episodeMatch[1]}`;
+            
+            if (seasonEpisodeMatch) {
+                seasonInfo = `S${seasonEpisodeMatch[1]}E${seasonEpisodeMatch[2]}`;
+            } else {
+                if (seasonMatch) seasonInfo += `S${seasonMatch[1]}`;
+                if (episodeMatch) seasonInfo += `E${episodeMatch[1]}`;
+            }
         }
+        
+        // Clean title (remove common patterns)
+        let title = cleaned
+            .replace(/\b(19|20)\d{2}\b/g, '') // Remove year
+            .replace(/\b(480p|720p|1080p|1440p|2160p|4K|BluRay|WEBRip|HDRip|DVDRip|CAMRip|WEB-DL|BDRip)\b/gi, '') // Remove quality
+            .replace(/\b(x264|x265|H264|H265|HEVC|AAC|AC3|DTS|5\.1|7\.1|10bit|8CH|2CH|DS4K|AMZN|UNCUT)\b/gi, '') // Remove codecs and extra info
+            .replace(/\bS\d{1,2}E\d{1,2}\b/gi, '') // Remove season/episode from title
+            .replace(/\bS\d{1,2}\b/gi, '') // Remove season from title
+            .replace(/\bE\d{1,2}\b/gi, '') // Remove episode from title
+            .replace(/[._-]/g, ' ') // Replace separators with spaces
+            .replace(/\s+/g, ' ') // Multiple spaces to single
+            .trim();
 
         return {
             title: title || filename,
@@ -308,26 +317,48 @@ class TelegramAutoDetector {
             const bot = this.botRotator.bots[botIndex];
             const metadata = FileNameParser.parse(file.file_name || 'Unknown File');
             
-            // Generate unique ID
-            const fileId = `tg:${metadata.type}:${file.file_unique_id || file.file_id}`;
+            // Generate unique ID based on file and channel to prevent duplicates
+            const uniqueKey = `${message.chat.id}_${message.message_id}_${file.file_unique_id || file.file_id}`;
+            const fileId = `tg:${metadata.type}:${Buffer.from(uniqueKey).toString('base64').replace(/[^a-zA-Z0-9]/g, '')}`;
             
-            // Get file download URL
+            // Check if file already exists to prevent duplicates
+            const existingFiles = metadata.type === 'movie' ? AUTO_DETECTED_FILES.movies : AUTO_DETECTED_FILES.series;
+            if (existingFiles.has(fileId)) {
+                console.log('📋 File already exists, skipping:', metadata.title);
+                return;
+            }
+            
+            // For files larger than 20MB (most videos), use direct Telegram streaming URL
             let streamUrl = null;
-            try {
-                const fileResponse = await axios.get(`https://api.telegram.org/bot${bot.token}/getFile`, {
-                    params: { file_id: file.file_id }
-                });
-                
-                if (fileResponse.data.ok) {
-                    streamUrl = `https://api.telegram.org/file/bot${bot.token}/${fileResponse.data.result.file_path}`;
+            let isDirectUrl = false;
+            
+            // Try to get direct URL only for smaller files
+            if (file.file_size && file.file_size < 20971520) { // 20MB limit
+                try {
+                    const fileResponse = await axios.get(`https://api.telegram.org/bot${bot.token}/getFile`, {
+                        params: { file_id: file.file_id },
+                        timeout: 5000
+                    });
+                    
+                    if (fileResponse.data.ok) {
+                        streamUrl = `https://api.telegram.org/file/bot${bot.token}/${fileResponse.data.result.file_path}`;
+                        isDirectUrl = true;
+                    }
+                    
+                    this.botRotator.resetBotErrors(bot.token);
+                } catch (error) {
+                    if (error.response?.status === 429) {
+                        this.botRotator.markBotError(bot.token, true);
+                    }
+                    console.log('⚠️ Could not get direct URL for', metadata.title, '- using streaming method');
                 }
-                
-                this.botRotator.resetBotErrors(bot.token);
-            } catch (error) {
-                if (error.response?.status === 429) {
-                    this.botRotator.markBotError(bot.token, true);
-                }
-                console.log('Could not get direct URL for', metadata.title);
+            }
+            
+            // For larger files or if direct URL failed, use streaming approach
+            if (!streamUrl) {
+                // Use a special streaming endpoint that we'll create
+                streamUrl = `https://${process.env.RENDER_EXTERNAL_HOSTNAME || 'localhost'}/stream-file/${bot.index}/${file.file_id}`;
+                console.log('🎥 Using streaming URL for', metadata.title);
             }
 
             // Create file entry
@@ -335,11 +366,11 @@ class TelegramAutoDetector {
                 id: fileId,
                 name: metadata.title,
                 year: metadata.year || 'Unknown',
-                description: `Auto-detected: ${metadata.originalFileName}${metadata.seasonInfo ? ` (${metadata.seasonInfo})` : ''}`,
+                description: `${metadata.originalFileName}${metadata.seasonInfo ? ` (${metadata.seasonInfo})` : ''}`,
                 poster: this.getDefaultPoster(metadata.type),
                 genre: [metadata.type === 'movie' ? 'Movies' : 'TV Shows'],
                 imdb_id: '',
-                streamUrl: streamUrl || `https://t.me/c/${message.chat.id.toString().replace('-100', '')}/${message.message_id}`,
+                streamUrl: streamUrl,
                 quality: metadata.quality || 'Unknown',
                 size: this.formatFileSize(file.file_size),
                 channelId: message.chat.id.toString(),
@@ -347,7 +378,8 @@ class TelegramAutoDetector {
                 fileId: file.file_id,
                 fileName: metadata.originalFileName,
                 dateAdded: Date.now(),
-                botIndex: botIndex
+                botIndex: botIndex,
+                isDirectUrl: isDirectUrl
             };
 
             // Store in appropriate category
@@ -578,6 +610,79 @@ class EnhancedMediaServer {
                 res.status(200).send('OK');
             });
         }
+
+        // File streaming endpoint for large files
+        app.get('/stream-file/:botIndex/:fileId', async (req, res) => {
+            try {
+                const { botIndex, fileId } = req.params;
+                const bot = this.detector.botRotator.bots[parseInt(botIndex)];
+                
+                if (!bot) {
+                    return res.status(404).send('Bot not found');
+                }
+
+                // Get file info from Telegram
+                const fileInfoResponse = await axios.get(`https://api.telegram.org/bot${bot.token}/getFile`, {
+                    params: { file_id: fileId },
+                    timeout: 10000
+                });
+
+                if (!fileInfoResponse.data.ok) {
+                    return res.status(404).send('File not found');
+                }
+
+                const filePath = fileInfoResponse.data.result.file_path;
+                const telegramFileUrl = `https://api.telegram.org/file/bot${bot.token}/${filePath}`;
+
+                // Proxy the file stream
+                const fileResponse = await axios({
+                    method: 'GET',
+                    url: telegramFileUrl,
+                    responseType: 'stream',
+                    timeout: 0 // No timeout for streaming
+                });
+
+                // Set appropriate headers
+                res.set({
+                    'Content-Type': fileResponse.headers['content-type'] || 'video/mp4',
+                    'Content-Length': fileResponse.headers['content-length'],
+                    'Accept-Ranges': 'bytes',
+                    'Cache-Control': 'public, max-age=3600'
+                });
+
+                // Handle range requests for video seeking
+                if (req.headers.range && fileResponse.headers['content-length']) {
+                    const total = parseInt(fileResponse.headers['content-length']);
+                    const range = req.headers.range;
+                    const parts = range.replace(/bytes=/, "").split("-");
+                    const start = parseInt(parts[0], 10);
+                    const end = parts[1] ? parseInt(parts[1], 10) : total - 1;
+                    const chunksize = (end - start) + 1;
+                    
+                    res.status(206);
+                    res.set({
+                        'Content-Range': `bytes ${start}-${end}/${total}`,
+                        'Content-Length': chunksize
+                    });
+                }
+
+                // Pipe the response
+                fileResponse.data.pipe(res);
+
+                fileResponse.data.on('error', (error) => {
+                    console.error('Stream error:', error);
+                    if (!res.headersSent) {
+                        res.status(500).send('Stream error');
+                    }
+                });
+
+            } catch (error) {
+                console.error('File streaming error:', error);
+                if (!res.headersSent) {
+                    res.status(500).send('File streaming failed');
+                }
+            }
+        });
 
         // Root endpoint
         app.get('/', (req, res) => {
