@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: telegram-stremio-addon
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: TELEGRAM_BOT_TOKENS
+        sync: false
+      - key: TELEGRAM_CHANNELS
+        sync: false
+      - key: RATE_LIMIT_DELAY
+        value: 1000
+      - key: MAX_REQUESTS_PER_BOT_PER_MINUTE
+        value: 20
+      - key: RETRY_ATTEMPTS
+        value: 3
+      - key: RETRY_DELAY
+        value: 2000
+      - key: CACHE_TTL
+        value: 3600000
