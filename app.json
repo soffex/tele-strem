@@ -1,0 +1,103 @@
+{
+  "name": "Tele-Strem FileStream (4GB Support)",
+  "description": "Advanced Telegram-based Stremio addon with FileStream technology supporting up to 4GB files for Premium users",
+  "keywords": [
+    "stremio",
+    "telegram",
+    "streaming",
+    "filestream", 
+    "4gb",
+    "premium",
+    "movies",
+    "addon"
+  ],
+  "repository": "https://github.com/your-username/tele-strem-filestream",
+  "logo": "https://via.placeholder.com/256x256/0080FF/FFFFFF?text=TFS",
+  "success_url": "/health",
+  "env": {
+    "BOT_TOKEN": {
+      "description": "Main bot token from @BotFather",
+      "required": true
+    },
+    "LOG_CHANNEL": {
+      "description": "Channel ID where files are stored (e.g., -1001234567890). Create a channel, post something, forward to @missrose_bot, reply with /id",
+      "required": true
+    },
+    "TELEGRAM_API_ID": {
+      "description": "API ID from https://my.telegram.org (REQUIRED for 4GB files support)",
+      "required": false
+    },
+    "TELEGRAM_API_HASH": {
+      "description": "API Hash from https://my.telegram.org (REQUIRED for 4GB files support)",
+      "required": false
+    },
+    "TELEGRAM_STRING_SESSION": {
+      "description": "Session string (add this AFTER first deployment and authentication)",
+      "required": false
+    },
+    "MULTI_TOKEN1": {
+      "description": "Worker bot token #1 for load balancing (optional but recommended)",
+      "required": false
+    },
+    "MULTI_TOKEN2": {
+      "description": "Worker bot token #2 for load balancing (optional but recommended)",
+      "required": false
+    },
+    "MULTI_TOKEN3": {
+      "description": "Worker bot token #3 for load balancing (optional but recommended)",
+      "required": false
+    },
+    "MULTI_TOKEN4": {
+      "description": "Worker bot token #4 for load balancing (optional)",
+      "required": false
+    },
+    "MULTI_TOKEN5": {
+      "description": "Worker bot token #5 for load balancing (optional)",
+      "required": false
+    },
+    "SEARCH_CHANNELS": {
+      "description": "Comma-separated list of channels to search for content (e.g., @movies,@series,-1001111111111)",
+      "required": false
+    },
+    "HASH_LENGTH": {
+      "description": "Length of hash for streaming URLs (6-32 characters)",
+      "value": "8",
+      "required": false
+    },
+    "CACHE_TTL": {
+      "description": "Cache duration in seconds",
+      "value": "3600",
+      "required": false
+    },
+    "CHUNK_SIZE": {
+      "description": "Streaming chunk size in bytes",
+      "value": "1048576",
+      "required": false
+    },
+    "ENABLE_AUTO_FORWARD": {
+      "description": "Automatically forward files to log channel (true/false)",
+      "value": "true",
+      "required": false
+    },
+    "ENABLE_CACHING": {
+      "description": "Enable result caching (true/false)",
+      "value": "true",
+      "required": false
+    },
+    "HOST": {
+      "description": "Your app's full URL (leave empty for auto-detection)",
+      "required": false
+    }
+  },
+  "formation": {
+    "web": {
+      "quantity": 1,
+      "size": "starter"
+    }
+  },
+  "buildpacks": [
+    {
+      "url": "heroku/nodejs"
+    }
+  ]
+}
